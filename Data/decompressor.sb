@@ -1,0 +1,11 @@
+# Extract Raw OpenML Suite data
+echo "Decompressing raw_openml_suite_271_binary_classification.tar.gz..."
+tar -xzf raw_openml_suite_271_binary_classification.tar.gz
+echo "Decompressed: Raw_OpenML_Suite_271_Binary_Classification/"
+
+# Extract RF Timing Splits data
+echo "Decompressing timing_splits.tar.gz..."
+tar -xzf timing_splits.tar.gz
+echo "Created: timing_splits.tar.gz"
+
+echo "Compression complete!"
