@@ -184,7 +184,7 @@ def main():
             assert error >= 0.0, f"Error occurred during training for model ID {model_id}"
 
             # check if time limit exceeded an hour
-            if time() - start_time > 3600:
+            if time() - start_time_all > 3600:
                 print("Time limit exceeded for this batch. Moving to next batch.", flush=True)
                 time_limit_broken = True
                 break
@@ -217,6 +217,11 @@ def main():
             json.dump({'time_exceeded': True, 'total_time': total_time}, f, indent=4)
         with open(best_model_path, 'w') as f:
             json.dump({}, f, indent=4)
+
+        print(f"Saved partial global results to {global_results_path}", flush=True)
+        print(f"Saved empty best model results to {best_model_path}\n", flush=True)
+        ray.shutdown()
+        return
 
     # go though all all_config_results and compute mean and variance accuracies for each model
     for model_id, results in all_config_results.items():
