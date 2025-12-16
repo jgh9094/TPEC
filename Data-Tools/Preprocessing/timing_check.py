@@ -94,30 +94,30 @@ def main():
     # Initialize Ray
     ray.init(ignore_reinit_error=True, num_cpus=12, log_to_driver=True)
 
-    print(f"{'='*70}")
-    print(f"{model_name} Timing Check")
-    print(f"{'='*70}")
-    print(f"Model Type: {args.model_type}")
-    print(f"Task ID: {args.task_id}")
-    print(f"Replicate: {args.rep}")
-    print(f"Number of CV Folds: {NUM_FOLDS}")
-    print(f"Random Seed: {args.seed}")
-    print(f"Total Models: {args.num_models}")
-    print(f"Batch Size: {args.batch_size}")
-    print(f"{'='*70}\n")
+    print(f"{'='*70}", flush=True)
+    print(f"{model_name} Timing Check", flush=True)
+    print(f"{'='*70}", flush=True)
+    print(f"Model Type: {args.model_type}", flush=True)
+    print(f"Task ID: {args.task_id}", flush=True)
+    print(f"Replicate: {args.rep}", flush=True)
+    print(f"Number of CV Folds: {NUM_FOLDS}", flush=True)
+    print(f"Random Seed: {args.seed}", flush=True)
+    print(f"Total Models: {args.num_models}", flush=True)
+    print(f"Batch Size: {args.batch_size}", flush=True)
+    print(f"{'='*70}\n", flush=True)
 
     # Construct paths - include task-specific folder
     rep_dir = os.path.join(args.split_directory, f"task_{args.task_id}", f"Replicate_{args.rep}")
 
     # Load data
-    print("Loading data...")
+    print("Loading data...", flush=True)
     X_train, X_test, y_train, y_test = load_data(
         task_id=args.task_id,
         data_dir=args.data_directory,
         splits_dir=rep_dir
     )
-    print(f"Training data shape: {X_train.shape}")
-    print(f"Test data shape: {X_test.shape}\n")
+    print(f"Training data shape: {X_train.shape}", flush=True)
+    print(f"Test data shape: {X_test.shape}\n", flush=True)
 
     # Initialize model parameter class
     # GradientBoostParams requires number of classes
@@ -128,12 +128,12 @@ def main():
         model_params_class = model_config['param_class']()
 
     # Generate all random parameters upfront
-    print(f"Generating {args.num_models} random {model_name} parameter configurations...")
+    print(f"Generating {args.num_models} random {model_name} parameter configurations...", flush=True)
     all_params = []
     for _ in range(args.num_models):
         params = model_params_class.generate_random_parameters(rng)
         all_params.append(params)
-    print(f"Generated {len(all_params)} parameter configurations.\n")
+    print(f"Generated {len(all_params)} parameter configurations.\n", flush=True)
 
     # Process all folds
     X_train_f0, X_val_f0, y_train_f0, y_val_f0, \
@@ -160,7 +160,7 @@ def main():
         batch_params = all_params[batch_start_id:batch_end_id]
         time_limit_broken = False
 
-        print(f"Processing batch {batch_idx + 1}/{num_batches} (Models {batch_start_id} to {batch_end_id - 1})...")
+        print(f"Processing batch {batch_idx + 1}/{num_batches} (Models {batch_start_id} to {batch_end_id - 1})...", flush=True)
 
         start_time = time()
 
@@ -184,7 +184,7 @@ def main():
 
             # check if time limit exceeded an hour
             if time() - start_time > 3600:
-                print("Time limit exceeded for this batch. Moving to next batch.")
+                print("Time limit exceeded for this batch. Moving to next batch.", flush=True)
                 time_limit_broken = True
                 break
 
@@ -202,7 +202,7 @@ def main():
 
         end_time = time()
         batch_duration = end_time - start_time
-        print(f"Completed batch {batch_idx + 1}/{num_batches} in {batch_duration:.2f} seconds.\n")
+        print(f"Completed batch {batch_idx + 1}/{num_batches} in {batch_duration:.2f} seconds.\n", flush=True)
 
     # total time in minutes
     total_time = (time() - start_time_all) / 60
@@ -210,7 +210,7 @@ def main():
     best_model_path = os.path.join(args.output_directory, f"best_model_results.json")
 
     if time_limit_broken:
-        print("Time limit was exceeded during processing. Partial results will be saved.")
+        print("Time limit was exceeded during processing. Partial results will be saved.", flush=True)
         # save summary_stats to json
         with open(global_results_path, 'w') as f:
             json.dump({'time_exceeded': True, 'total_time': total_time}, f, indent=4)
@@ -249,13 +249,13 @@ def main():
     # save summary_stats to json
     with open(global_results_path, 'w') as f:
         json.dump(summary_stats, f, indent=4)
-    print(f"Saved global results to {global_results_path}")
+    print(f"Saved global results to {global_results_path}", flush=True)
 
     # find the best model based on greatest mean_val_accuracy
     best_model_id = max(all_config_results, key=lambda mid: all_config_results[mid]['mean_val_accuracy'])
 
     # train the best_model on the full training data and evaluate on test data
-    print(f"\nTraining best model ID {best_model_id} on full training data...")
+    print(f"\nTraining best model ID {best_model_id} on full training data...", flush=True)
     best_model_params = all_config_results[best_model_id]['parameters']
     train, test, error = model_config['eval_func'](
         X_train=X_train,
@@ -267,9 +267,9 @@ def main():
     )
 
     if error < 0.0:
-        print(f"Error occurred while training best model on full data. Skipping test evaluation.")
+        print(f"Error occurred while training best model on full data. Skipping test evaluation.", flush=True)
     else:
-        print(f"Best Model Test Accuracy: {test:.4f}")
+        print(f"Best Model Test Accuracy: {test:.4f}", flush=True)
 
     best_model_results = {
         'cv_mean_train_accuracy': float(all_config_results[best_model_id]['mean_train_accuracy']),
@@ -290,13 +290,13 @@ def main():
             best_model_results[key] = value
     with open(best_model_path, 'w') as f:
         json.dump(best_model_results, f, indent=4)
-    print(f"Saved best model results to {best_model_path}\n")
+    print(f"Saved best model results to {best_model_path}\n", flush=True)
 
     # Shutdown Ray
     ray.shutdown()
 
     # print total time taken
-    print(f"Total time taken: {total_time:.2f} minutes")
+    print(f"Total time taken: {total_time:.2f} minutes", flush=True)
 
 
 if __name__ == "__main__":
