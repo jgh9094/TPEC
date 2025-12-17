@@ -1,7 +1,7 @@
 #!/bin/bash
 ########## Define Resources Needed with SBATCH Lines ##########
 #SBATCH --time=03:00:00
-#SBATCH --mem=10G
+#SBATCH --mem=30G
 #SBATCH --cpus-per-task=12
 #SBATCH --array=0-339
 #SBATCH --job-name=et_t
