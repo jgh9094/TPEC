@@ -155,13 +155,26 @@ class TPE:
             **param_space.get_params_by_type('int'),
             **param_space.get_params_by_type('float'),
         }
+        categorical_params = {
+            **param_space.get_params_by_type('cat'),
+            **param_space.get_params_by_type('bool')
+        }
+        
+        # Validate that fitted models exist for parameter types present in the space
+        if numeric_params:
+            assert self.multi_l is not None and self.multi_g is not None, \
+                "MultivariateKDE models must be fitted when numeric parameters exist."
+        
+        if categorical_params:
+            assert len(self.cat_l) > 0 and len(self.cat_g) > 0, \
+                "CategoricalPMF models must be fitted when categorical parameters exist."
 
         numeric_params_names = list(numeric_params.keys())
 
         # Sample from the good numeric distribution
         multi_samples = self.multi_l.sample(rng=rng, n_samples=num_samples) # shape (dimensions, n_samples)
-        assert(multi_samples.shape[0] == len(numeric_params_names))
-        assert(multi_samples.shape[1] == num_samples)
+        assert multi_samples.shape[0] == len(numeric_params_names)
+        assert multi_samples.shape[1] == num_samples
 
         # Align numeric parameter names to each dimension
         params = {
@@ -192,7 +205,7 @@ class TPE:
         for i in range(num_samples):
             # Map name to a single value
             ind_params = {name: params[name][i] for name in param_space.param_space}
-            ind = Individual(ind_params)
+            ind = Individual(ind_params, param_space.get_model_type())
             samples.append(ind)
 
         assert(len(samples) == num_samples)
