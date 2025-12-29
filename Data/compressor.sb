@@ -1,16 +1,21 @@
 # Compress Raw OpenML Suite data
 echo "Compressing Raw_OpenML_Suite_271_Binary_Classification..."
-tar -czf raw_openml_suite_271_binary_classification.tar.gz Raw_OpenML_Suite_271_Binary_Classification/
+tar --no-xattrs -czf raw_openml_suite_271_binary_classification.tar.gz Raw_OpenML_Suite_271_Binary_Classification/
 echo "Created: raw_openml_suite_271_binary_classification.tar.gz"
 
 # Compress RF Timing Splits data
-echo "Compressing RF_Timing_Splits..."
-tar -czf timing_splits.tar.gz Timing_Splits/
+echo "Compressing Timing_Splits..."
+tar --no-xattrs -czf timing_splits.tar.gz Timing_Splits/
 echo "Created: timing_splits.tar.gz"
 
 # Compress RF Timing Results data
-echo "Compressing RF_Timing_Results..."
-tar -czf timing_results.tar.gz Timing_Results/
+echo "Compressing Timing_Results..."
+tar --no-xattrs -czf timing_results.tar.gz Timing_Results/
 echo "Created: timing_results.tar.gz"
+
+# Compress TPEC Tuning Splits data
+echo "Compressing Exp1_Splits..."
+tar --no-xattrs -czf exp1_splits.tar.gz Exp1_Splits/
+echo "Created: exp1_splits.tar.gz"
 
 echo "Compression complete!"

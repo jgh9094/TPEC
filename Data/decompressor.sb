@@ -13,4 +13,9 @@ echo "Decompressing timing_results.tar.gz..."
 tar -xzf timing_results.tar.gz
 echo "Created: timing_results.tar.gz"
 
+# Extract TPEC Tuning Splits data
+echo "Decompressing exp1_splits.tar.gz..."
+tar -xzf exp1_splits.tar.gz
+echo "Created: Exp1_Splits/"
+
 echo "Compression complete!"
