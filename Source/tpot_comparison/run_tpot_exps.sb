@@ -1,0 +1,16 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=24
+#SBATCH --time=07-00:00:00
+#SBATCH --mem=25000MB
+#SBATCH --job-name=tpot
+#SBATCH -p defq,moore
+#SBATCH --array=1-100
+#SBATCH -o logs/output.%j_%a.out # STDOUT
+
+source /home/sainia3/anaconda3/etc/profile.d/conda.sh
+conda activate tpotenv
+
+srun -u python tpot_wrapper.py --cpus-per-task=24 --machine remote
