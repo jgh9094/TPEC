@@ -145,7 +145,7 @@ class TPE:
         self.cat_l: Dict[str, CategoricalPMF] = {} # good, categorical
         self.cat_g: Dict[str, CategoricalPMF] = {} # bad, categorical
 
-    def sample(self, num_samples: int, param_space: ModelParams, rng: np.random.Generator) -> List[Individual]:
+    def sample(self, num_samples: int, param_space: ModelParams, rng: np.random.Generator) -> List[Dict]:
         """
         Returns 'num_samples' Individuals.
         For each Individual's params, sample from the "good" MultivariateKDE and CategoricalPMFs separately,
@@ -159,12 +159,12 @@ class TPE:
             **param_space.get_params_by_type('cat'),
             **param_space.get_params_by_type('bool')
         }
-        
+
         # Validate that fitted models exist for parameter types present in the space
         if numeric_params:
             assert self.multi_l is not None and self.multi_g is not None, \
                 "MultivariateKDE models must be fitted when numeric parameters exist."
-        
+
         if categorical_params:
             assert len(self.cat_l) > 0 and len(self.cat_g) > 0, \
                 "CategoricalPMF models must be fitted when categorical parameters exist."
@@ -201,12 +201,11 @@ class TPE:
 
         assert all(len(v) == num_samples for v in params.values())
 
-        samples: List[Individual] = []
+        samples: List[Dict] = []
         for i in range(num_samples):
             # Map name to a single value
             ind_params = {name: params[name][i] for name in param_space.param_space}
-            ind = Individual(ind_params, param_space.get_model_type())
-            samples.append(ind)
+            samples.append(ind_params)
 
         assert(len(samples) == num_samples)
         return samples
@@ -327,9 +326,9 @@ class TPE:
                 ei_scores.append((l_num * l_cat) / (g_num * g_cat))
         return np.asarray(ei_scores)
 
-    def suggest(self, param_space: ModelParams, candidates: List[Dict], rng: np.random.Generator) -> int:
+    def suggest_one(self, param_space: ModelParams, candidates: List[Dict], rng: np.random.Generator) -> int:
         """
-        Suggest the top-k candidates based on expected improvement.
+        Suggest the top candidate based on expected improvement.
 
         Parameters:
             candidates (List[Individual]): Candidate individuals to rank.
@@ -348,3 +347,54 @@ class TPE:
 
         # randomly select one of the best indices
         return int(rng.choice(best_indices))
+
+    def suggest_top_k(self, param_space: ModelParams, candidates: List[Dict], k: int, rng: np.random.Generator) -> List[int]:
+        """
+        Suggest the top k candidates based on expected improvement scores.
+        Handles ties by randomly sampling among candidates with equal scores.
+
+        Parameters:
+            param_space (ModelParams): The parameter space definition.
+            candidates (List[Dict]): Candidate parameter dictionaries to rank.
+            k (int): Number of top candidates to return.
+            rng (np.random.Generator): Random number generator for tie-breaking.
+
+        Returns:
+            List[int]: Indices of the top k candidates in the original candidates list.
+        """
+        if k > len(candidates):
+            k = len(candidates)
+
+        scores = self.expected_improvement(param_space, candidates)
+
+        # Create list of (index, score) tuples
+        indexed_scores = list(enumerate(scores))
+
+        # Sort by score (descending)
+        indexed_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Find the k-th highest score (or tie boundary)
+        if k == len(candidates):
+            return [idx for idx, _ in indexed_scores]
+
+        kth_score = indexed_scores[k-1][1]
+
+        # Collect all candidates with scores >= k-th score
+        candidates_above_threshold = [idx for idx, score in indexed_scores if score > kth_score]
+        candidates_at_threshold = [idx for idx, score in indexed_scores if score == kth_score]
+
+        # If we have exactly k candidates above threshold, return them
+        if len(candidates_above_threshold) == k:
+            return candidates_above_threshold
+
+        # If we have fewer than k above threshold, we need to sample from the tie
+        remaining_slots = k - len(candidates_above_threshold)
+
+        # Randomly sample from candidates at the threshold score
+        sampled_at_threshold = rng.choice(
+            candidates_at_threshold,
+            size=remaining_slots,
+            replace=False
+        ).tolist()
+
+        return candidates_above_threshold + sampled_at_threshold
