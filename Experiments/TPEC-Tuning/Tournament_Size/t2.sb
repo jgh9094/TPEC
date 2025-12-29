@@ -1,0 +1,70 @@
+#!/bin/bash
+########## Define Resources Needed with SBATCH Lines ##########
+#SBATCH --time=03:00:00
+#SBATCH --mem=10G
+#SBATCH --cpus-per-task=12
+#SBATCH --array=0-104
+#SBATCH --job-name=e1-t2
+#SBATCH -p moore,defq
+#SBATCH --exclude=esplhpc-cp040
+###############################################################
+
+########## Load Conda Environment ##########
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+########## Define Variables ##########
+# Array of task IDs from tasks_summary.csv
+TASK_IDS=(146818 359956 190137 190411 359975)
+
+# Number of replicates per task
+NUM_REPLICATES=21
+
+# Check if SLURM_ARRAY_TASK_ID is set (if running locally for testing, use 0)
+if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
+    SLURM_ARRAY_TASK_ID=0
+fi
+
+# Calculate task_id and replicate from SLURM_ARRAY_TASK_ID
+TASK_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
+REP=$((SLURM_ARRAY_TASK_ID % NUM_REPLICATES))
+TASK_ID=${TASK_IDS[$TASK_INDEX]}
+
+# Verify TASK_ID was set correctly
+if [ -z "${TASK_ID}" ]; then
+    echo "ERROR: TASK_ID is empty! TASK_INDEX=${TASK_INDEX}, SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+    exit 1
+fi
+
+# Set paths (adjust these to your actual paths)
+BASE_DIR="/home/hernandezj45/Repos/GECCO-2026-TPEC"
+SCRIPT_PATH="${BASE_DIR}/Experiments/TPEC-Tuning/experiment.py"
+DATA_DIR="${BASE_DIR}/Data/Raw_OpenML_Suite_271_Binary_Classification"
+SPLIT_DIR="${BASE_DIR}/Data/Exp1_Splits"
+OUTPUT_DIR="${BASE_DIR}/Data/Exp1_Results/task_${TASK_ID}/T2/Replicate_${REP}"
+
+########## Create Output Directory ##########
+mkdir -p ${OUTPUT_DIR}
+
+########## Print Job Information ##########
+echo "======================================"
+echo "SLURM Job Information"
+echo "======================================"
+echo "Job ID: ${SLURM_JOB_ID}"
+echo "Array Task ID: ${SLURM_ARRAY_TASK_ID}"
+echo "Task Index: ${TASK_INDEX}"
+echo "Task ID: ${TASK_ID}"
+echo "Replicate/Seed: ${REP}"
+echo "Output Directory: ${OUTPUT_DIR}"
+echo "======================================"
+echo ""
+
+########## Execute Python Script ##########
+python ${SCRIPT_PATH} \
+    --seed ${REP} \
+    --task_id ${TASK_ID} \
+    --data_directory ${DATA_DIR} \
+    --split_directory ${SPLIT_DIR} \
+    --rep ${REP} \
+    --tournament_size 2 \
+    --output_directory ${OUTPUT_DIR}
