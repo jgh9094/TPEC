@@ -46,6 +46,10 @@ OUTPUT_DIR="${BASE_DIR}/Data/Exp1_Results/task_${TASK_ID}/T2/Replicate_${REP}"
 ########## Create Output Directory ##########
 mkdir -p ${OUTPUT_DIR}
 
+########## Change to Repository Directory ##########
+cd ${BASE_DIR}
+export PYTHONPATH="${BASE_DIR}:${PYTHONPATH}"
+
 ########## Print Job Information ##########
 echo "======================================"
 echo "SLURM Job Information"
