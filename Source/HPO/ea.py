@@ -229,8 +229,6 @@ class EA:
 
         return
 
-
-
     def evaluation(self, candidates: List[Individual]) -> List[Individual]:
         """
         Evaluate a collection of individuals using Ray across 5-fold cross-validation.
