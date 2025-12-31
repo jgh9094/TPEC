@@ -23,7 +23,7 @@ DATA_DIR="${BASE_DIR}/Data/Exp1_Results/MutP"
 TASK_IDS=(task_146818 task_190137 task_190411 task_359956 task_359975)
 
 # Array of tournament sizes
-TOURNAMENT_SIZES=(P25 P50 P75 P100)
+PROBABILITIES=(P25 P50 P75 P100)
 
 # Number of replicates per task
 NUM_REPLICATES=21
@@ -37,12 +37,11 @@ fi
 # Total combinations: 5 tasks * 5 tournament sizes * 21 replicates = 525
 TASK_INDEX=$((SLURM_ARRAY_TASK_ID / (5 * NUM_REPLICATES)))
 REMAINING=$((SLURM_ARRAY_TASK_ID % (5 * NUM_REPLICATES)))
-TOURNAMENT_INDEX=$((REMAINING / NUM_REPLICATES))
+PROBABILITY_INDEX=$((REMAINING / NUM_REPLICATES))
 REP=$((REMAINING % NUM_REPLICATES))
 
 TASK_ID=${TASK_IDS[$TASK_INDEX]}
-TOURNAMENT_SIZE=${TOURNAMENT_SIZES[$TOURNAMENT_INDEX]}
-
+PROBABILITY=${PROBABILITIES[$PROBABILITY_INDEX]}
 # Verify TASK_ID was set correctly
 if [ -z "${TASK_ID}" ]; then
     echo "ERROR: TASK_ID is empty! TASK_INDEX=${TASK_INDEX}, SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
@@ -50,7 +49,7 @@ if [ -z "${TASK_ID}" ]; then
 fi
 
 # Set path to archive.csv
-ARCHIVE_PATH="${DATA_DIR}/${TASK_ID}/${TOURNAMENT_SIZE}/Replicate_${REP}/${TASK_ID}/rep_${REP}/archive.csv"
+ARCHIVE_PATH="${DATA_DIR}/${TASK_ID}/${PROBABILITY}/Replicate_${REP}/archive.csv"
 
 # Check if archive.csv exists
 if [ ! -f "${ARCHIVE_PATH}" ]; then
