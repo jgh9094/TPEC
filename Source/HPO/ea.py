@@ -301,6 +301,8 @@ class EA:
         """
         assert len(parent_ids) == len(candidates), "Number of parent IDs must match number of candidates."
         assert len(parent_ids) > 0, "At least one parent must be selected."
+        assert len(self.tpe_archive) > 0, "TPE archive must have at least one individual for TPE-based mutation"
+        assert len(self.tpe_archive) == len(self.archive), "TPE archive size must match main archive size."
 
         # store offspring here
         offspring = []
@@ -318,9 +320,6 @@ class EA:
             return offspring
 
         else:
-            # TPE-based mutation
-            assert len(self.tpe_archive) > 0, "TPE archive must have at least one individual for TPE-based mutation"
-            assert len(self.tpe_archive) == len(self.archive), "TPE archive size must match main archive size."
             # fit tpe model
             self.tpe.fit(self.tpe_archive, self.param_space, self.rng)
             for pid in parent_ids:
@@ -357,9 +356,7 @@ class EA:
             arch_ind.set_val_performance(ind.get_val_performance())  # TPE minimizes, so invert performance
             self.archive.append(arch_ind)
 
-        if self.tpe is not None:
-            for ind in evaluated_individuals:
-                tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
-                tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
-                self.tpe_archive.append(tpe_ind)
+            tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
+            tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
+            self.tpe_archive.append(tpe_ind)
         return
