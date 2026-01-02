@@ -9,8 +9,8 @@ tar --no-xattrs -czf timing.tar.gz Timing/
 echo "Created: timing.tar.gz"
 
 # Compress Exp1 Results
-echo "Compressing Exp1_Results..."
-tar --no-xattrs -czf exp1.tar.gz Exp1_Results/
+echo "Compressing Exp1..."
+tar --no-xattrs -czf exp1.tar.gz Exp1/
 echo "Created: exp1.tar.gz"
 
 # Compress Exp2 Results
