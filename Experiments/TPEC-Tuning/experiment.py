@@ -20,7 +20,7 @@ if __name__ == "__main__":
     # replicate number
     parser.add_argument('--rep', type=int, default=0, help='Replicate number.')
     # tournament size
-    parser.add_argument('--tournament_size', type=int, default=25, help='Tournament size for parent selection.')
+    parser.add_argument('--tournament_size', type=int, default=5, help='Tournament size for parent selection.')
     # variance for mutation
     parser.add_argument('--mutation_var', type=float, default=0.5, help='Variance for Gaussian mutation of parameters.')
     # mutation rate
