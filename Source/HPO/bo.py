@@ -121,7 +121,7 @@ class BO:
 
         best_perf = max([ind.get_val_performance() for ind in current_set])
         print(f"Initial set size: {len(current_set)}", flush=True)
-        print(f"Best performance so far (Gen 0): {best_perf}", flush=True)
+        print(f"Best performance so far: {best_perf}", flush=True)
 
         # start evolution
         while self.hard_eval_count < self.total_evals:
