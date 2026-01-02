@@ -162,18 +162,18 @@ class ModelParams(ABC):
 
 @typechecked
 class RandomForestParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(10, 1000), type='int'), # int
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'), # categorical
             'max_depth': IntParam(bounds=(1, 30), type='int'), # int
-            'min_samples_split': FloatParam(bounds=(.001, 1.0), type='float'), # float
-            'min_samples_leaf': FloatParam(bounds=(.001, 1.0), type='float'), # float
-            'min_weight_fraction_leaf': FloatParam(bounds=(.0, .5), type='float'), # float
-            'max_features': FloatParam(bounds=(.001, 1.0), type='float'), # float
+            'min_samples_split': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'), # float
+            'min_samples_leaf': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'), # float
+            'min_weight_fraction_leaf': FloatParam(bounds=(0.0 + offset, .5), type='float'), # float
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'), # float
             'max_leaf_nodes': IntParam(bounds=(2, 1000), type='int'), # int
             'bootstrap': BoolParam(bounds=(True, False), type='bool'),  # boolean
-            'max_samples': FloatParam(bounds=(.001, 1.0), type='float'),  # float
+            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),  # float
             'class_weight': CatParam(bounds=(None, 'balanced'), type='cat')
         })
 
@@ -295,16 +295,16 @@ class RandomForestParams(ModelParams):
 
 @typechecked
 class LinearSVCParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         # Bounds taken from TPOT
         super().__init__(param_space = {
-            'C': FloatParam(bounds=(0.01, 1e4), type='float'),
+            'C': FloatParam(bounds=(0.0 + offset, 1e4), type='float'),
             'penalty': CatParam(bounds=('l1', 'l2'), type='cat'),
             'loss': CatParam(bounds=('hinge', 'squared_hinge'), type='cat'),
             'dual': BoolParam(bounds=(True, False), type='bool'),
             'fit_intercept': BoolParam(bounds=(True, False), type='bool'),
             'intercept_scaling': FloatParam(bounds=(0.1, 10.0), type='float'),
-            'tol': FloatParam(bounds=(.001, 1e-1), type='float'),
+            'tol': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
             'max_iter': IntParam(bounds=(1000, 10000), type='int'),
             'class_weight': CatParam(bounds=(None, 'balanced'), type='cat')
         })
@@ -399,15 +399,15 @@ class LinearSVCParams(ModelParams):
 
 @typechecked
 class DecisionTreeParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
             'splitter': CatParam(bounds=('best', 'random'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'min_samples_split': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_samples_leaf': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_weight_fraction_leaf': FloatParam(bounds=(.0, .5), type='float'),
-            'max_features': FloatParam(bounds=(.001, 1.0), type='float'),
+            'min_samples_split': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_samples_leaf': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_weight_fraction_leaf': FloatParam(bounds=(0.0 + offset, 0.5), type='float'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'max_leaf_nodes': IntParam(bounds=(2, 1000), type='int'),
             'class_weight': CatParam(bounds=(None, 'balanced'), type='cat')
         })
@@ -492,15 +492,15 @@ class DecisionTreeParams(ModelParams):
 
 @typechecked
 class KernelSVCParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
-            'C': FloatParam(bounds=(0.01, 1e4), type='float'),
+            'C': FloatParam(bounds=(0.0 + offset, 1e4), type='float'),
             'kernel': CatParam(bounds=('linear', 'poly', 'rbf', 'sigmoid'), type='cat'),
             'degree': IntParam(bounds=(0, 5), type='int'),
             'gamma': CatParam(bounds=('scale', 'auto'), type='cat'),
             'coef0': FloatParam(bounds=(-1.0, 1.0), type='float'),
             'shrinking': BoolParam(bounds=(True, False), type='bool'),
-            'tol': FloatParam(bounds=(.001, 1e-1), type='float'),
+            'tol': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
             'max_iter': IntParam(bounds=(1000, 10000), type='int'),
             'class_weight': CatParam(bounds=(None, 'balanced'), type='cat'),
             'decision_function_shape': CatParam(bounds=('ovo', 'ovr'), type='cat')
@@ -586,18 +586,18 @@ class KernelSVCParams(ModelParams):
 
 @typechecked
 class ExtraTreesParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
             'n_estimators': IntParam(bounds=(10, 1000), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'min_samples_split': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_samples_leaf': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_weight_fraction_leaf': FloatParam(bounds=(.0, .5), type='float'),
-            'max_features': FloatParam(bounds=(.001, 1.0), type='float'),
+            'min_samples_split': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_samples_leaf': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_weight_fraction_leaf': FloatParam(bounds=(0.0 + offset, 0.5), type='float'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'max_leaf_nodes': IntParam(bounds=(2, 1000), type='int'),
             'bootstrap': BoolParam(bounds=(True, False), type='bool'),
-            'max_samples': FloatParam(bounds=(.001, 1.0), type='float'),
+            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'class_weight': CatParam(bounds=(None, 'balanced'), type='cat'),
         })
 
@@ -718,23 +718,23 @@ class ExtraTreesParams(ModelParams):
 
 @typechecked
 class GradientBoostParams(ModelParams):
-    def __init__(self, classes: int):
+    def __init__(self, classes: int, offset: float = 1.0e-4):
         self.classes = classes
         super().__init__(param_space = {
             'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat'),
-            'learning_rate': FloatParam(bounds=(1e-3, 10.0), type='float'),
+            'learning_rate': FloatParam(bounds=(0.0 + offset, 10.0), type='float'),
             'n_estimators': IntParam(bounds=(10, 1000), type='int'),
-            'subsample': FloatParam(bounds=(.001, 1.0), type='float'),
+            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'min_samples_split': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_samples_leaf': FloatParam(bounds=(.001, 1.0), type='float'),
-            'min_weight_fraction_leaf': FloatParam(bounds=(.0, .5), type='float'),
-            'max_features': FloatParam(bounds=(.001, 1.0), type='float'),
+            'min_samples_split': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_samples_leaf': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'min_weight_fraction_leaf': FloatParam(bounds=(0.0 + offset, 0.5), type='float'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'max_leaf_nodes': IntParam(bounds=(2, 1000), type='int'),
             'validation_fraction': FloatParam(bounds=(.05, 0.5), type='float'),
             'n_iter_no_change': IntParam(bounds=(1, 100), type='int'),
-            'tol': FloatParam(bounds=(.001, 1e-1), type='float')
+            'tol': FloatParam(bounds=(0.0 + offset, 1e-1), type='float')
         })
 
     def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
@@ -828,18 +828,18 @@ class GradientBoostParams(ModelParams):
 
 @typechecked
 class LinearSGDParams(ModelParams):
-    def __init__(self):
+    def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
-            'alpha': FloatParam(bounds=(1e-5, 0.01), type='float'),
+            'alpha': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
             'penalty': CatParam(bounds=('l2', 'l1', 'elasticnet', None), type='cat'),
-            'l1_ratio': FloatParam(bounds=(0.0, 1.0), type='float'),
+            'l1_ratio': FloatParam(bounds=(0.0 + offset, 1.0 + offset), type='float'),
             'loss': CatParam(bounds=('hinge', 'log_loss', 'modified_huber', 'squared_hinge', 'perceptron'), type='cat'),
             'fit_intercept': BoolParam(bounds=(True, False), type='bool'),
             'shuffle': BoolParam(bounds=(True, False), type='bool'),
             'learning_rate': CatParam(bounds=('constant', 'optimal', 'invscaling', 'adaptive'), type='cat'),
-            'eta0': FloatParam(bounds=(0.0001, 1.0), type='float'),
-            'power_t': FloatParam(bounds=(.0001, 10.0), type='float'),
-            'tol': FloatParam(bounds=(.001, 1e-1), type='float'),
+            'eta0': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
+            'power_t': FloatParam(bounds=(0.0 + offset, 10.0), type='float'),
+            'tol': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
             'max_iter': IntParam(bounds=(1000, 10000), type='int'),
             'early_stopping': BoolParam(bounds=(True, False), type='bool'),
             'validation_fraction': FloatParam(bounds=(.05, 0.5), type='float'),
