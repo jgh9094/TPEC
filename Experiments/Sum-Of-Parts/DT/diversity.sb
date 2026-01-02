@@ -50,7 +50,7 @@ if [ -z "${TASK_ID}" ]; then
 fi
 
 # Set path to archive.csv
-ARCHIVE_PATH="${DATA_DIR}/task_${TASK_ID}/${OPTIMIZER}/Replicate_${REP}/archive.csv"
+ARCHIVE_PATH="${DATA_DIR}/${OPTIMIZER}/Replicate_${REP}/archive.csv"
 
 # Check if archive.csv exists
 if [ ! -f "${ARCHIVE_PATH}" ]; then
