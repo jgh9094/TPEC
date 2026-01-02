@@ -40,7 +40,8 @@ def train_random_forest(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_decision_tree: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -76,7 +77,8 @@ def train_linear_svc(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_linear_svc: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -112,7 +114,8 @@ def train_decision_tree(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_decision_tree: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -148,7 +151,8 @@ def train_kernel_svc(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_kernel_svc: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -183,7 +187,9 @@ def train_extra_trees(
         train_acc = float(accuracy_score(y_train, model.predict(X_train)))
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
-    except Exception:
+
+    except Exception as e:
+        print(f"Error in train_decision_tree: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -219,7 +225,8 @@ def train_gradient_boost(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_gradient_boost: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -255,5 +262,6 @@ def train_linear_sgd(
         val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
         return id, train_acc, val_acc, 1.0
 
-    except Exception:
+    except Exception as e:
+        print(f"Error in train_linear_sgd: {e}")
         return id, 0.0, 0.0, -1.0
