@@ -1,0 +1,601 @@
+---
+title: "Tournament Size Analysis for TPEC"
+author: "Anonymous"
+date: "`r Sys.Date()`"
+output: bookdown::pdf_book
+documentclass: article
+description: "Supplementary Material"
+geometry: margin=2cm
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 5,
+  fig.align = 'center'
+)
+```
+
+```{r load-libraries, include=FALSE}
+rm(list = ls())
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+library(PupillometryR)
+library(ggpubr)
+library(knitr)
+```
+
+```{r theme-setup, include=FALSE}
+# Define conditions and visual parameters
+CONDITIONS <- c(5, 10, 25, 50, 100)
+SHAPE <- c(21, 21, 21, 21, 21)
+cb_palette <- c('#648FFF', '#785EF0','#DC267F', '#FE6100', '#FFB000')
+TSIZE <- 17
+
+# Theme for plots
+p_theme <- theme(
+  plot.title = element_text(face = "bold", hjust=0.5),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  legend.title = element_text(size=17),
+  legend.text = element_text(size=17),
+  axis.title = element_text(size=17),
+  axis.text = element_text(size=11),
+  axis.text.y = element_text(angle = 90, hjust = 0.5),
+  legend.position = "none",
+  panel.background = element_rect(fill = "#f1f2f5",
+                                  colour = "white",
+                                  size = 0.5, linetype = "solid")
+)
+```
+
+```{r load-data, include=FALSE}
+# Load the tournament size data
+df <- read.csv("./g10.csv")
+df$tournament_size <- factor(df$tournament_size, levels = CONDITIONS)
+```
+
+# Methods
+
+## Statistical Analysis
+
+We employ two statistical tests:
+
+1. **Friedman Test**: A non-parametric test to detect differences across multiple tournament sizes
+2. **Pairwise Wilcoxon Signed-Rank Tests**: Post-hoc tests with holm correction to identify specific differences between Mutation Probability pairs. Specifically, row sizes were tested for significantly lower scores compared to column sizes (in tables).
+
+# Task 146818
+
+## Testing Accuracy
+
+```{r task-146818-test-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 146818)
+
+ggplot(task_data, aes(x = tournament_size, y = test_accuracy,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Accuracy") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Accuracy on Testing Set') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-146818-test-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(test_accuracy)),
+    min = min(test_accuracy, na.rm = TRUE),
+    median = median(test_accuracy, na.rm = TRUE),
+    mean = mean(test_accuracy, na.rm = TRUE),
+    max = max(test_accuracy, na.rm = TRUE),
+    IQR = IQR(test_accuracy, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-146818-test-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+## Diversity Metric
+
+```{r task-146818-diversity-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 146818)
+
+ggplot(task_data, aes(x = tournament_size, y = diversity_metric,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Euclidean Distance") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Diversity Metric of All Evaluated Parameters Configurations') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-146818-diversity-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(diversity_metric)),
+    min = min(diversity_metric, na.rm = TRUE),
+    median = median(diversity_metric, na.rm = TRUE),
+    mean = mean(diversity_metric, na.rm = TRUE),
+    max = max(diversity_metric, na.rm = TRUE),
+    IQR = IQR(diversity_metric, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-146818-diversity-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(diversity_metric ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-146818-diversity-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+# Task 359956
+
+## Testing Accuracy
+
+```{r task-359956-test-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 359956)
+
+ggplot(task_data, aes(x = tournament_size, y = test_accuracy,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Accuracy") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Accuracy on Testing Set') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-359956-test-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(test_accuracy)),
+    min = min(test_accuracy, na.rm = TRUE),
+    median = median(test_accuracy, na.rm = TRUE),
+    mean = mean(test_accuracy, na.rm = TRUE),
+    max = max(test_accuracy, na.rm = TRUE),
+    IQR = IQR(test_accuracy, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-359956-test-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+## Diversity Metric
+
+```{r task-359956-diversity-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 359956)
+
+ggplot(task_data, aes(x = tournament_size, y = diversity_metric,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Euclidean Distance") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Diversity Metric of All Evaluated Parameters Configurations') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-359956-diversity-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(diversity_metric)),
+    min = min(diversity_metric, na.rm = TRUE),
+    median = median(diversity_metric, na.rm = TRUE),
+    mean = mean(diversity_metric, na.rm = TRUE),
+    max = max(diversity_metric, na.rm = TRUE),
+    IQR = IQR(diversity_metric, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-359956-diversity-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(diversity_metric ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-359956-diversity-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+
+# Task 190137
+
+## Testing Accuracy
+
+```{r task-190137-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 190137)
+
+ggplot(task_data, aes(x = tournament_size, y = test_accuracy,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Accuracy") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Accuracy on Testing Set') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-190137-test-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(test_accuracy)),
+    min = min(test_accuracy, na.rm = TRUE),
+    median = median(test_accuracy, na.rm = TRUE),
+    mean = mean(test_accuracy, na.rm = TRUE),
+    max = max(test_accuracy, na.rm = TRUE),
+    IQR = IQR(test_accuracy, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-190137-test-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+## Diversity Metric
+
+```{r task-190137-diversity-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 190137)
+
+ggplot(task_data, aes(x = tournament_size, y = diversity_metric,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Euclidean Distance") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Diversity Metric of All Evaluated Parameters Configurations') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-190137-diversity-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(diversity_metric)),
+    min = min(diversity_metric, na.rm = TRUE),
+    median = median(diversity_metric, na.rm = TRUE),
+    mean = mean(diversity_metric, na.rm = TRUE),
+    max = max(diversity_metric, na.rm = TRUE),
+    IQR = IQR(diversity_metric, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-190137-diversity-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(diversity_metric ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-190137-diversity-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+# Task 190411
+
+## Testing Accuracy
+
+```{r task-190411-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 190411)
+
+ggplot(task_data, aes(x = tournament_size, y = test_accuracy,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Accuracy") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Accuracy on Testing Set') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-190411-test-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(test_accuracy)),
+    min = min(test_accuracy, na.rm = TRUE),
+    median = median(test_accuracy, na.rm = TRUE),
+    mean = mean(test_accuracy, na.rm = TRUE),
+    max = max(test_accuracy, na.rm = TRUE),
+    IQR = IQR(test_accuracy, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-190411-test-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-190411-test-wilcox, echo=FALSE}
+task_data$tournament_size <- factor(task_data$tournament_size, levels = c(5,10,50,25,100))
+pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+## Diversity Metric
+
+```{r task-190411-diversity-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 190411)
+
+ggplot(task_data, aes(x = tournament_size, y = diversity_metric,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Euclidean Distance") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Diversity Metric of All Evaluated Parameters Configurations') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-190411-diversity-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(diversity_metric)),
+    min = min(diversity_metric, na.rm = TRUE),
+    median = median(diversity_metric, na.rm = TRUE),
+    mean = mean(diversity_metric, na.rm = TRUE),
+    max = max(diversity_metric, na.rm = TRUE),
+    IQR = IQR(diversity_metric, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-190411-diversity-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(diversity_metric ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-190411-diversity-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+# Task 359975
+
+## Testing Accuracy
+
+```{r task-359975-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 359975)
+
+ggplot(task_data, aes(x = tournament_size, y = test_accuracy,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Accuracy") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Accuracy on Testing Set') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-359975-test-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(test_accuracy)),
+    min = min(test_accuracy, na.rm = TRUE),
+    median = median(test_accuracy, na.rm = TRUE),
+    mean = mean(test_accuracy, na.rm = TRUE),
+    max = max(test_accuracy, na.rm = TRUE),
+    IQR = IQR(test_accuracy, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-359975-test-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-359975-test-wilcox, echo=FALSE}
+task_data$tournament_size <- factor(task_data$tournament_size, levels = c(5,10,50,25,100))
+pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
+
+## Diversity Metric
+
+```{r task-359975-diversity-plot, out.width="100%"}
+task_data <- df %>% filter(task_id == 359975)
+
+ggplot(task_data, aes(x = tournament_size, y = diversity_metric,
+                      color = tournament_size, fill = tournament_size,
+                      shape = tournament_size)) +
+  geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                   scale = 'width', alpha = 0.2, width = 1.5) +
+  geom_boxplot(color = 'black', width = .07, outlier.shape = NA,
+               alpha = 0.0, size = 1.0,
+               position = position_nudge(x = .16, y = 0)) +
+  geom_point(position = position_jitter(width = 0.02, height = 0.0001),
+             size = 1.5, alpha = 1.0) +
+  scale_y_continuous(name = "Euclidean Distance") +
+  scale_x_discrete(name = "Tournament Size") +
+  scale_shape_manual(values = SHAPE) +
+  scale_colour_manual(values = cb_palette) +
+  scale_fill_manual(values = cb_palette) +
+  ggtitle('Diversity Metric of All Evaluated Parameters Configurations') +
+  p_theme
+```
+
+### Summary Statistics
+
+```{r task-359975-diversity-summary, echo=FALSE}
+task_data %>%
+group_by(tournament_size) %>%
+  dplyr::summarise(
+    count = n(),
+    na_cnt = sum(is.na(diversity_metric)),
+    min = min(diversity_metric, na.rm = TRUE),
+    median = median(diversity_metric, na.rm = TRUE),
+    mean = mean(diversity_metric, na.rm = TRUE),
+    max = max(diversity_metric, na.rm = TRUE),
+    IQR = IQR(diversity_metric, na.rm = TRUE)
+  )
+```
+
+### Friedman Test
+
+```{r task-359975-diversity-friedman, echo=FALSE}
+task_data <- task_data %>% arrange(tournament_size, seed)
+friedman.test(diversity_metric ~ tournament_size | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+
+```{r task-359975-diversity-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
+```
