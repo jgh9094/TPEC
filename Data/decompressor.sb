@@ -3,29 +3,19 @@ echo "Decompressing raw_openml_suite_271_binary_classification.tar.gz..."
 tar --exclude='._*' -xzf raw_openml_suite_271_binary_classification.tar.gz
 echo "Decompressed: Raw_OpenML_Suite_271_Binary_Classification/"
 
-# Extract Timing Splits data
-echo "Decompressing timing_splits.tar.gz..."
-tar --exclude='._*' -xzf timing_splits.tar.gz
-echo "Created: timing_splits.tar.gz"
+# Extract Timing Data
+echo "Decompressing timing.tar.gz..."
+tar --exclude='._*' -xzf timing.tar.gz
+echo "Decompressed: timing/"
 
-# Extract RF Timing Results data
-echo "Decompressing timing_results.tar.gz..."
-tar -xzf timing_results.tar.gz
-echo "Created: timing_results.tar.gz"
+# Extract Experiment 1 Data
+echo "Decompressing exp1.tar.gz..."
+tar --exclude='._*' -xzf exp1.tar.gz
+echo "Decompressed: Exp1/"
 
-# Extract TPEC Tuning Splits data
-echo "Decompressing exp1_splits.tar.gz..."
-tar --exclude='._*' -xzf exp1_splits.tar.gz
-echo "Created: Exp1_Splits/"
-
-# Extract TPEC Tuning Results data
-echo "Decompressing exp1_results.tar.gz..."
-tar --exclude='._*' -xzf exp1_results.tar.gz
-echo "Created: Exp1_Results/"
-
-# Extract TPEC MutP Tuning Splits data
-echo "Decompressing exp1_mutp_splits.tar.gz..."
-tar --exclude='._*' -xzf exp1_mutp_splits.tar.gz
-echo "Created: Exp1_MutP_Splits/"
+# Extract Experiment 2 Data
+echo "Decompressing exp2.tar.gz..."
+tar --exclude='._*' -xzf exp2.tar.gz
+echo "Decompressed: Exp2/"
 
 echo "Compression complete!"

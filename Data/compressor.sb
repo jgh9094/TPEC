@@ -3,29 +3,19 @@ echo "Compressing Raw_OpenML_Suite_271_Binary_Classification..."
 tar --no-xattrs -czf raw_openml_suite_271_binary_classification.tar.gz Raw_OpenML_Suite_271_Binary_Classification/
 echo "Created: raw_openml_suite_271_binary_classification.tar.gz"
 
-# Compress RF Timing Splits data
-echo "Compressing Timing_Splits..."
-tar --no-xattrs -czf timing_splits.tar.gz Timing_Splits/
-echo "Created: timing_splits.tar.gz"
+# Compress Timing data
+echo "Compressing Timing..."
+tar --no-xattrs -czf timing.tar.gz Timing/
+echo "Created: timing.tar.gz"
 
-# Compress RF Timing Results data
-echo "Compressing Timing_Results..."
-tar --no-xattrs -czf timing_results.tar.gz Timing_Results/
-echo "Created: timing_results.tar.gz"
-
-# Compress TPEC Tuning Splits data
-echo "Compressing Exp1_Splits..."
-tar --no-xattrs -czf exp1_splits.tar.gz Exp1_Splits/
-echo "Created: exp1_splits.tar.gz"
-
-# Compress TPEC Tuning Results data
+# Compress Exp1 Results
 echo "Compressing Exp1_Results..."
-tar --no-xattrs -czf exp1_results.tar.gz Exp1_Results/
-echo "Created: exp1_results.tar.gz"
+tar --no-xattrs -czf exp1.tar.gz Exp1_Results/
+echo "Created: exp1.tar.gz"
 
-# Compress TPEC MutP Tuning Splits data
-echo "Compressing Exp1_MutP_Splits..."
-tar --no-xattrs -czf exp1_mutp_splits.tar.gz Exp1_MutP_Splits/
-echo "Created: exp1_mutp_splits.tar.gz"
+# Compress Exp2 Results
+echo "Compressing Exp2..."
+tar --no-xattrs -czf exp2.tar.gz Exp2/
+echo "Created: exp2.tar.gz"
 
 echo "Compression complete!"
