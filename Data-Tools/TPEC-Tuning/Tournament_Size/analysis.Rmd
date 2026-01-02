@@ -51,11 +51,14 @@ p_theme <- theme(
                                   colour = "white",
                                   size = 0.5, linetype = "solid")
 )
+
+# Set digits option
+options(digits = 4)
 ```
 
 ```{r load-data, include=FALSE}
 # Load the tournament size data
-df <- read.csv("./g10.csv")
+df <- read.csv("./data.csv")
 df$tournament_size <- factor(df$tournament_size, levels = CONDITIONS)
 ```
 
@@ -101,12 +104,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
-    median = median(test_accuracy, na.rm = TRUE),
-    mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    median = round(median(test_accuracy, na.rm = TRUE), 5),
+    mean = round(mean(test_accuracy, na.rm = TRUE), 5),
+    max = max(test_accuracy, na.rm = TRUE)
   )
 ```
 
@@ -148,12 +149,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -204,13 +203,16 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
+```
+
+Median of tournament size 10 == tournament size 5?
+```{r task-359956-test-med-tie-break, echo=FALSE}
+median(filter(task_data, tournament_size == 5)$test_accuracy) == median(filter(task_data, tournament_size == 10)$test_accuracy)
 ```
 
 ### Friedman Test
@@ -218,6 +220,11 @@ group_by(tournament_size) %>%
 ```{r task-359956-test-friedman, echo=FALSE}
 task_data <- task_data %>% arrange(tournament_size, seed)
 friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
+```
+
+```{r task-359956-test-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$tournament_size, paired = TRUE,
+                p.adjust.method = "holm", alternative = "less")
 ```
 
 ## Diversity Metric
@@ -251,12 +258,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -308,13 +313,28 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
+```
+
+Medians equal for all tournament sizes?
+```{r task-190137-test-med-tie-break, echo=FALSE}
+medians <- c(
+  median(dplyr::filter(task_data, tournament_size == 5)$test_accuracy),
+  median(dplyr::filter(task_data, tournament_size == 10)$test_accuracy),
+  median(dplyr::filter(task_data, tournament_size == 25)$test_accuracy),
+  median(dplyr::filter(task_data, tournament_size == 50)$test_accuracy),
+  median(dplyr::filter(task_data, tournament_size == 100)$test_accuracy)
+)
+all(medians == medians[1])
+```
+
+Mean of tournament size 5 > tournament size 25?
+```{r task-190137-test-mean-tie-break, echo=FALSE}
+mean(dplyr::filter(task_data, tournament_size == 5)$test_accuracy) > mean(dplyr::filter(task_data, tournament_size == 25)$test_accuracy)
 ```
 
 ### Friedman Test
@@ -355,12 +375,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -411,12 +429,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
 ```
 
@@ -466,14 +482,23 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
+
+Median of tournament size 5 > tournament size 10?
+```{r task-190411-test-med-tie-break, echo=FALSE}
+median(filter(task_data, tournament_size == 5)$diversity_metric) > median(filter(task_data, tournament_size == 10)$diversity_metric)
+```
+
+Mean of tournament size 5 > tournament size 25?
+```{r task-190411-test-mean-tie-break, echo=FALSE}
+mean(dplyr::filter(task_data, tournament_size == 5)$diversity_metric) > mean(dplyr::filter(task_data, tournament_size == 25)$diversity_metric)
+```
+
 
 ### Friedman Test
 
@@ -522,12 +547,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
 ```
 
@@ -536,14 +559,6 @@ group_by(tournament_size) %>%
 ```{r task-359975-test-friedman, echo=FALSE}
 task_data <- task_data %>% arrange(tournament_size, seed)
 friedman.test(test_accuracy ~ tournament_size | seed, data = task_data)
-```
-
-### Pairwise Wilcoxon Signed-Rank Tests
-
-```{r task-359975-test-wilcox, echo=FALSE}
-task_data$tournament_size <- factor(task_data$tournament_size, levels = c(5,10,50,25,100))
-pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$tournament_size, paired = TRUE,
-                p.adjust.method = "holm", alternative = "less")
 ```
 
 ## Diversity Metric
@@ -577,12 +592,10 @@ task_data %>%
 group_by(tournament_size) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 

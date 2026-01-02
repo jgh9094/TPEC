@@ -53,7 +53,7 @@ p_theme <- theme(
 
 ```{r load-data, include=FALSE}
 # Load the Mutation Probability data
-df <- read.csv("./mutation_prob.csv")
+df <- read.csv("./data.csv")
 df$mutation_prob <- factor(df$mutation_prob, levels = CONDITIONS)
 ```
 
@@ -99,13 +99,26 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
     max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
   )
+```
+
+Mean of mutation prob 100 > mutation prob 25?
+```{r task-146818-test-mean-tie-break, echo=FALSE}
+mean(dplyr::filter(task_data, mutation_prob == 100)$test_accuracy) > mean(dplyr::filter(task_data, mutation_prob == 25)$test_accuracy)
+```
+
+Median equal for mutation prob 100, 75, and 50?
+```{r task-146818-test-med-tie-break, echo=FALSE}
+medians <- c(
+  median(dplyr::filter(task_data, mutation_prob == 50)$test_accuracy),
+  median(dplyr::filter(task_data, mutation_prob == 75)$test_accuracy),
+  median(dplyr::filter(task_data, mutation_prob == 100)$test_accuracy)
+)
+all(medians == medians[1])
 ```
 
 ### Friedman Test
@@ -146,20 +159,27 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
+
+Mean of mutation prob 75 > mutation prob 50 > ?
 
 ### Friedman Test
 
 ```{r task-146818-diversity-friedman, echo=FALSE}
 task_data <- task_data %>% arrange(mutation_prob, seed)
 friedman.test(diversity_metric ~ mutation_prob | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+```{r task-146818-diversity-wilcox, echo=FALSE}
+task_data$mutation_prob <- factor(task_data$mutation_prob, levels = c(100, 75, 25, 50))
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$mutation_prob, paired = TRUE,
+                p.adjust.method = "holm", alternative = "greater")
 ```
 
 # Task 359956
@@ -195,12 +215,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
 ```
 
@@ -211,8 +229,9 @@ task_data <- task_data %>% arrange(mutation_prob, seed)
 friedman.test(test_accuracy ~ mutation_prob | seed, data = task_data)
 ```
 
-### Pairwise Wilcoxon Signed-Rank Tests
+### Wilcoxon Signed-Rank Tests
 ```{r task-359956-test-wilcox, echo=FALSE}
+task_data$mutation_prob <- factor(task_data$mutation_prob, levels = c(25, 100, 50, 75))
 pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$mutation_prob, paired = TRUE,
                 p.adjust.method = "holm", alternative = "greater")
 ```
@@ -248,12 +267,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -262,6 +279,13 @@ group_by(mutation_prob) %>%
 ```{r task-359956-diversity-friedman, echo=FALSE}
 task_data <- task_data %>% arrange(mutation_prob, seed)
 friedman.test(diversity_metric ~ mutation_prob | seed, data = task_data)
+```
+
+### Wilcoxon Signed-Rank Tests
+```{r task-359956-diversity-wilcox, echo=FALSE}
+task_data$mutation_prob <- factor(task_data$mutation_prob, levels = c(100, 25, 75, 50))
+pairwise.wilcox.test(x = task_data$diversity_metric, g = task_data$mutation_prob, paired = TRUE,
+                p.adjust.method = "holm", alternative = "greater")
 ```
 
 # Task 190137
@@ -297,13 +321,22 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
+```
+
+Medians for all mutation probabilities equal?
+```{r task-190137-test-med-tie-break, echo=FALSE}
+medians <- c(
+  median(dplyr::filter(task_data, mutation_prob == 25)$test_accuracy),
+  median(dplyr::filter(task_data, mutation_prob == 50)$test_accuracy),
+  median(dplyr::filter(task_data, mutation_prob == 75)$test_accuracy),
+  median(dplyr::filter(task_data, mutation_prob == 100)$test_accuracy)
+)
+all(medians == medians[1])
 ```
 
 ### Friedman Test
@@ -311,6 +344,12 @@ group_by(mutation_prob) %>%
 ```{r task-190137-test-friedman, echo=FALSE}
 task_data <- task_data %>% arrange(mutation_prob, seed)
 friedman.test(test_accuracy ~ mutation_prob | seed, data = task_data)
+```
+
+### Pairwise Wilcoxon Signed-Rank Tests
+```{r task-190137-test-wilcox, echo=FALSE}
+pairwise.wilcox.test(x = task_data$test_accuracy, g = task_data$mutation_prob, paired = TRUE,
+                p.adjust.method = "holm", alternative = "greater")
 ```
 
 ## Diversity Metric
@@ -344,12 +383,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -400,12 +437,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
 ```
 
@@ -454,12 +489,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
     max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
   )
 ```
 
@@ -510,13 +543,16 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(test_accuracy)),
     min = min(test_accuracy, na.rm = TRUE),
     median = median(test_accuracy, na.rm = TRUE),
     mean = mean(test_accuracy, na.rm = TRUE),
-    max = max(test_accuracy, na.rm = TRUE),
-    IQR = IQR(test_accuracy, na.rm = TRUE)
+    max = max(test_accuracy, na.rm = TRUE)
   )
+```
+
+Mean of mutation prob 100 > mutation prob 75?
+```{r task-359975-test-mean-tie-break, echo=FALSE}
+mean(dplyr::filter(task_data, mutation_prob == 100)$test_accuracy) > mean(dplyr::filter(task_data, mutation_prob == 75)$test_accuracy)
 ```
 
 ### Friedman Test
@@ -564,12 +600,10 @@ task_data %>%
 group_by(mutation_prob) %>%
   dplyr::summarise(
     count = n(),
-    na_cnt = sum(is.na(diversity_metric)),
     min = min(diversity_metric, na.rm = TRUE),
     median = median(diversity_metric, na.rm = TRUE),
     mean = mean(diversity_metric, na.rm = TRUE),
-    max = max(diversity_metric, na.rm = TRUE),
-    IQR = IQR(diversity_metric, na.rm = TRUE)
+    max = max(diversity_metric, na.rm = TRUE)
   )
 ```
 
