@@ -72,5 +72,5 @@ python ${SCRIPT_PATH} \
     --data_directory ${DATA_DIR} \
     --split_directory ${SPLIT_DIR} \
     --rep ${REP} \
-\    --mutation_rate 0.50 \
+    --mutation_rate 0.50 \
     --output_directory ${OUTPUT_DIR}
