@@ -41,7 +41,7 @@ BASE_DIR="/home/hernandezj45/Repos/GECCO-2026-TPEC"
 SCRIPT_PATH="${BASE_DIR}/Experiments/Sum-Of-Parts/ea_experiment.py"
 DATA_DIR="${BASE_DIR}/Data/Raw_OpenML_Suite_271_Binary_Classification"
 SPLIT_DIR="${BASE_DIR}/Data/Exp2/Splits"
-OUTPUT_DIR="${BASE_DIR}/Data/Exp2_Results/RF/task_${TASK_ID}/EA/Replicate_${REP}"
+OUTPUT_DIR="${BASE_DIR}/Data/Exp2/Results/RF/task_${TASK_ID}/EA/Replicate_${REP}"
 SEED=$((REP)) # Offset seed to avoid overlap with other experiments
 
 ########## Create Output Directory ##########
