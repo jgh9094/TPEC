@@ -832,7 +832,7 @@ class LinearSGDParams(ModelParams):
         super().__init__(param_space = {
             'alpha': FloatParam(bounds=(0.0 + offset, 1e-1), type='float'),
             'penalty': CatParam(bounds=('l2', 'l1', 'elasticnet', None), type='cat'),
-            'l1_ratio': FloatParam(bounds=(0.0 + offset, 1.0 + offset), type='float'),
+            'l1_ratio': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'loss': CatParam(bounds=('hinge', 'log_loss', 'modified_huber', 'squared_hinge', 'perceptron'), type='cat'),
             'fit_intercept': BoolParam(bounds=(True, False), type='bool'),
             'shuffle': BoolParam(bounds=(True, False), type='bool'),
