@@ -3,7 +3,7 @@
 #SBATCH --time=01:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=1
-#SBATCH --array=0-314
+#SBATCH --array=0-629
 #SBATCH --job-name=DT-Diversity
 #SBATCH -p moore,defq
 #SBATCH --exclude=esplhpc-cp040
@@ -20,7 +20,7 @@ SCRIPT_PATH="${BASE_DIR}/Source/HPO/diversity.py"
 DATA_DIR="${BASE_DIR}/Data/Exp2/Results/DT"
 
 # Array of task IDs
-TASK_IDS=(task_146818 task_190137 task_190411 task_359956 task_359975)
+TASK_IDS=(task_359955 task_168757 task_359958 task_359962 task_168911 task_359965 task_146820 task_359968 task_359972 task_168350)
 
 # Optimizers used
 OPTIMIZERS=(BO EA TPEC)
@@ -34,9 +34,10 @@ if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
 fi
 
 # Calculate indices from SLURM_ARRAY_TASK_ID
-# Total combinations: 5 tasks * 3 optimizers * 21 replicates = 315
-TASK_INDEX=$((SLURM_ARRAY_TASK_ID / (5 * NUM_REPLICATES)))
-REMAINING=$((SLURM_ARRAY_TASK_ID % (5 * NUM_REPLICATES)))
+# Total combinations: 10 tasks * 3 optimizers * 21 replicates = 630
+NUM_OPTIMIZERS=3
+TASK_INDEX=$((SLURM_ARRAY_TASK_ID / (NUM_OPTIMIZERS * NUM_REPLICATES)))
+REMAINING=$((SLURM_ARRAY_TASK_ID % (NUM_OPTIMIZERS * NUM_REPLICATES)))
 OPTIMIZER_INDEX=$((REMAINING / NUM_REPLICATES))
 REP=$((REMAINING % NUM_REPLICATES))
 
