@@ -56,7 +56,7 @@ def tournament_selection(population: List[Individual], size: int, rng: np.random
         indices = rng.choice(len(population), size, replace=False)
         # Extract performances at the chosen indices
         extracted_performances = np.array([population[i].get_val_performance() for i in indices])
-        # Get the position of the best (lowest) performance in the tournament (not population-based index)
-        best_tour_idx = np.argmin(extracted_performances)
+        # Get the position of the best (highest) performance in the tournament (not population-based index)
+        best_tour_idx = np.argmax(extracted_performances)
         # Randomly select one of the tied best individuals (population-based index)
         return int(rng.choice([i for i, perf in zip(indices, extracted_performances) if perf == extracted_performances[best_tour_idx]]))
