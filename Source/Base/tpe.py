@@ -131,7 +131,7 @@ class TPE:
     and uses kernel density estimation (KDE) and probability mass functions (PMFs)
     to model the likelihood of good and bad configurations.
     """
-    def __init__(self, gamma: float = 0.2):
+    def __init__(self, gamma: float):
         """
         Parameters:
             gamma (float): Fraction of samples considered "good".
