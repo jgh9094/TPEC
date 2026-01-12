@@ -1,5 +1,5 @@
 Data/Raw_OpenML_Suite_271_Binary_Classification
-Data/raw_openml_suite_271_binary_classification.tar.gz
+Data/*.tar.gz
 Data/Timing
 Data/timing.tar.gz
 Source/__pycache__/
@@ -13,3 +13,4 @@ Data/Exp2
 Data/exp2.tar.gz
 Data-Tools/TPEC-Tuning/*/data.csv
 Data-Tools/TPEC-Tuning/*/_book
+Data-Tools/Sum-Of-Parts/*.csv

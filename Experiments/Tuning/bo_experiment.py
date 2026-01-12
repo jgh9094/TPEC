@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # output directory
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # gamma for TPE
-    parser.add_argument('--gamma', type=float, default=0.4, help='Gamma parameter for TPE.')
+    parser.add_argument('--gamma', type=float, default=0.5, help='Gamma parameter for TPE.')
 
     args = parser.parse_args()
 
