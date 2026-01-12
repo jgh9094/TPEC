@@ -75,5 +75,4 @@ python ${SCRIPT_PATH} \
     --split_directory ${SPLIT_DIR} \
     --rep ${REP} \
     --output_directory ${OUTPUT_DIR} \
-    --gamma 0.4 \
     --tpe_prob 0.25
