@@ -28,7 +28,7 @@ if __name__ == "__main__":
     # variance for mutation
     parser.add_argument('--mutation_var', type=float, default=0.5, help='Variance for Gaussian mutation of parameters.')
     # mutation rate
-    parser.add_argument('--mutation_rate', type=float, default=0.1, help='Mutation rate for offspring generation.')
+    parser.add_argument('--mutation_rate', type=float, default=1.0, help='Mutation rate for offspring generation.')
     # number of generations
     parser.add_argument('--gens', type=int, default=9, help='Number of generations to evolve.')
     # population size
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     # output directory
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # gamma for TPE
-    parser.add_argument('--gamma', type=float, default=0.4, help='Gamma parameter for TPE.')
+    parser.add_argument('--gamma', type=float, default=0.5, help='Gamma parameter for TPE.')
     # probability for TPE event
     parser.add_argument('--tpe_prob', type=float, default=0.5, help='Probability of event for TPE.')
 
