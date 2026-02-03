@@ -7,10 +7,10 @@
 #SBATCH --mem=25000MB
 #SBATCH --job-name=tpot
 #SBATCH -p defq,moore
-#SBATCH --array=1-100
+#SBATCH --array=1-170
 #SBATCH -o logs/output.%j_%a.out # STDOUT
 
 source /home/sainia3/anaconda3/etc/profile.d/conda.sh
 conda activate tpotenv
 
-srun -u python tpot_wrapper.py --cpus-per-task=24 --machine remote
+srun python -m Source.tpot_comparison.tpot_wrapper --num_cpus 24 --num_reps 10 --machine remote
