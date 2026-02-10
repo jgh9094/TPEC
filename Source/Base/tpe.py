@@ -75,8 +75,8 @@ class MultivariateKDE:
                 raise ValueError("Unable to construct Multivariate KDE, even after adding noise.")
 
         # self.kde = gaussian_kde(data, bw_method='silverman')
-        # self.kde.set_bandwidth(self.kde.factor * bw_factor)
-        # self.eps = eps
+        self.kde.set_bandwidth(self.kde.factor * bw_factor)
+        self.eps = eps
 
     def __repr__(self):
         return f"MultivariateKDE(dims={self.kde.d}, samples={self.kde.n})"
