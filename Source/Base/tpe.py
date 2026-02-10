@@ -38,26 +38,45 @@ class MultivariateKDE:
         # if n == 1:
         #     data = np.hstack([data, data + 1e-3]) # duplicate it slightly
 
-        cov = np.cov(data, rowvar=True, bias=False)
-        rank = np.linalg.matrix_rank(cov)
+        # cov = np.cov(data, rowvar=True, bias=False)
+        # rank = np.linalg.matrix_rank(cov)
 
         # Another full rank check - add small noise to escape colinearity and constant dimensions
-        if rank < d:
-            # Scale noise relative to each feature's spread
+        # if rank < d:
+        #     # Scale noise relative to each feature's spread
+        #     per_dim_std = np.std(data, axis=1, ddof=1) # (d, )
+        #     per_dim_std = np.maximum(per_dim_std, 1e-6) # make sure std is not 0
+        #     Z = rng.normal(size=data.shape) # this should be the same shape as data
+        #     noise = Z * (1e-3 * per_dim_std[:, None])            
+        #     data = data + noise
+
+        #     # Recheck rank
+        #     cov = np.cov(data, rowvar=True, bias=False)
+        #     if np.linalg.matrix_rank(cov) < d:
+        #         raise ValueError("Still rank-deficient after adding noise.")
+
+        # Rank checking is too strict/is a proxy, just try
+        try:
+            self.kde = gaussian_kde(data, bw_method='silverman')
+        except np.linalg.LinAlgError: # Likely from Cholesky
+            # Add and scale noise relative to each feature's spread
             per_dim_std = np.std(data, axis=1, ddof=1) # (d, )
             per_dim_std = np.maximum(per_dim_std, 1e-6) # make sure std is not 0
             Z = rng.normal(size=data.shape) # this should be the same shape as data
             noise = Z * (1e-3 * per_dim_std[:, None])            
             data = data + noise
 
-            # Recheck rank
-            cov = np.cov(data, rowvar=True, bias=False)
-            if np.linalg.matrix_rank(cov) < d:
-                raise ValueError("Still rank-deficient after adding noise.")
+            try:
+                self.kde = gaussian_kde(data, bw_method='silverman')
+            except np.linalg.LinAlgError:
+                # We could drop model params that are near-constant here (by checking to see if std is close to 0)
+                # but that would require overhauling the system
+                # We could also build Univariate KDEs as backup, but again, overhaul
+                raise ValueError("Unable to construct Multivariate KDE, even after adding noise.")
 
-        self.kde = gaussian_kde(data, bw_method='silverman')
-        self.kde.set_bandwidth(self.kde.factor * bw_factor)
-        self.eps = eps
+        # self.kde = gaussian_kde(data, bw_method='silverman')
+        # self.kde.set_bandwidth(self.kde.factor * bw_factor)
+        # self.eps = eps
 
     def __repr__(self):
         return f"MultivariateKDE(dims={self.kde.d}, samples={self.kde.n})"
