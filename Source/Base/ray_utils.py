@@ -291,6 +291,10 @@ def train_random_forest_cv(
         Tuple of (id, list of train accuracies, list of val accuracies, error)
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -328,6 +332,10 @@ def train_linear_svc_cv(
     Train and evaluate LinearSVC across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -364,6 +372,10 @@ def train_decision_tree_cv(
     Train and evaluate DecisionTreeClassifier across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -400,6 +412,10 @@ def train_kernel_svc_cv(
     Train and evaluate SVC (Kernel SVM) across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -436,6 +452,10 @@ def train_extra_trees_cv(
     Train and evaluate ExtraTreesClassifier across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -472,6 +492,10 @@ def train_gradient_boost_cv(
     Train and evaluate GradientBoostingClassifier across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
@@ -508,6 +532,10 @@ def train_linear_sgd_cv(
     Train and evaluate SGDClassifier across all 5 CV folds in one task.
     """
     try:
+        # Dereference Ray ObjectRefs if needed
+        if isinstance(cv_data[0], ray.ObjectRef):
+            cv_data = tuple(ray.get(list(cv_data)))
+
         train_accs = []
         val_accs = []
 
