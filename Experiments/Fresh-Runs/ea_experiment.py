@@ -30,7 +30,7 @@ if __name__ == "__main__":
     # mutation rate
     parser.add_argument('--mutation_rate', type=float, default=1.0, help='Mutation rate for offspring generation.')
     # number of generations
-    parser.add_argument('--gens', type=int, default=18, help='Number of generations to evolve.')
+    parser.add_argument('--gens', type=int, default=19, help='Number of generations to evolve.')
     # population size
     parser.add_argument('--pop_size', type=int, default=50, help='Population size.')
     # output directory
