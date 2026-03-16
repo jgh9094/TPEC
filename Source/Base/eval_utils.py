@@ -4,7 +4,6 @@ from sklearn.svm import SVC, LinearSVC
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import accuracy_score
-import pandas as pd
 import numpy as np
 from typing import Dict, Any, Tuple
 from typeguard import typechecked
@@ -18,7 +17,9 @@ from Source.Base.model_param_space import (
 )
 from Source.Base.ray_utils import (
     train_random_forest, train_linear_svc, train_decision_tree,
-    train_kernel_svc, train_extra_trees, train_gradient_boost, train_linear_sgd
+    train_kernel_svc, train_extra_trees, train_gradient_boost, train_linear_sgd,
+    train_random_forest_cv, train_linear_svc_cv, train_decision_tree_cv,
+    train_kernel_svc_cv, train_extra_trees_cv, train_gradient_boost_cv, train_linear_sgd_cv
 )
 
 @typechecked
@@ -348,42 +349,49 @@ MODEL_CONFIG = {
     'RF': {
         'param_class': RandomForestParams(),
         'ray_train_func': train_random_forest,
+        'ray_train_func_cv': train_random_forest_cv,
         'test_eval_func': train_test_random_forest,
         'display_name': 'Random Forest'
     },
     'LSVC': {
         'param_class': LinearSVCParams(),
         'ray_train_func': train_linear_svc,
+        'ray_train_func_cv': train_linear_svc_cv,
         'test_eval_func': train_test_linear_svc,
         'display_name': 'Linear SVC'
     },
     'DT': {
         'param_class': DecisionTreeParams(),
         'ray_train_func': train_decision_tree,
+        'ray_train_func_cv': train_decision_tree_cv,
         'test_eval_func': train_test_decision_tree,
         'display_name': 'Decision Tree'
     },
     'KSVC': {
         'param_class': KernelSVCParams(),
         'ray_train_func': train_kernel_svc,
+        'ray_train_func_cv': train_kernel_svc_cv,
         'test_eval_func': train_test_kernel_svc,
         'display_name': 'Kernel SVC'
     },
     'ET': {
         'param_class': ExtraTreesParams(),
         'ray_train_func': train_extra_trees,
+        'ray_train_func_cv': train_extra_trees_cv,
         'test_eval_func': train_test_extra_trees,
         'display_name': 'Extra Trees'
     },
     'GB': {
         'param_class': GradientBoostParams(classes=2),
         'ray_train_func': train_gradient_boost,
+        'ray_train_func_cv': train_gradient_boost_cv,
         'test_eval_func': train_test_gradient_boost,
         'display_name': 'Gradient Boosting'
     },
     'LSGD': {
         'param_class': LinearSGDParams(),
         'ray_train_func': train_linear_sgd,
+        'ray_train_func_cv': train_linear_sgd_cv,
         'test_eval_func': train_test_linear_sgd,
         'display_name': 'Linear SGD'
     }

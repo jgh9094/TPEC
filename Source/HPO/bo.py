@@ -37,7 +37,8 @@ class BO:
 
         self.param_space = model_config['param_class'] # model parameter space
         self.test_eval_func = model_config['test_eval_func'] # model test evaluation function
-        self.ray_train_func = model_config['ray_train_func'] # ray remote training function
+        self.ray_train_func = model_config['ray_train_func'] # ray remote training function (deprecated)
+        self.ray_train_func_cv = model_config['ray_train_func_cv'] # ray remote training function for consolidated CV
 
         # bo parameters
 
@@ -94,6 +95,17 @@ class BO:
                                                                                            y_train=self.y_train,
                                                                                            task_id=self.task_id,
                                                                                            data_dir=self.data_directory)
+
+        # Put CV data into Ray's object store (optimization to avoid repeated serialization)
+        print(f"Storing CV data in Ray object store...", flush=True)
+        cv_data_tuple = (
+            self.X_train_f0, self.y_train_f0, self.X_val_f0, self.y_val_f0,
+            self.X_train_f1, self.y_train_f1, self.X_val_f1, self.y_val_f1,
+            self.X_train_f2, self.y_train_f2, self.X_val_f2, self.y_val_f2,
+            self.X_train_f3, self.y_train_f3, self.X_val_f3, self.y_val_f3,
+            self.X_train_f4, self.y_train_f4, self.X_val_f4, self.y_val_f4
+        )
+        self.cv_data_ref = ray.put(cv_data_tuple)
         return
 
     def run(self) -> None:
@@ -237,6 +249,9 @@ class BO:
         This method will update each individual's train and validation performance.
         Can be used for offspring evaluation during evolution or initial population evaluation.
 
+        Optimized version: Uses consolidated CV functions that process all 5 folds per
+        individual in a single Ray task, and leverages Ray's object store for CV data.
+
         Parameters:
             candidates (List[Individual]): List of individuals to evaluate.
 
@@ -245,38 +260,25 @@ class BO:
         """
 
         ray_jobs = []
-        pop_results = {}
-        # load evaluation jobs for all folds for all individuals
+        # Create one Ray task per individual (instead of 5 per individual)
         for i, ind in enumerate(candidates):
-            pop_results[i] = {'train_acc': [], 'val_acc': []}
-            # fold 0
-            ray_jobs.append(self.ray_train_func.remote(self.X_train_f0, self.y_train_f0, self.X_val_f0, self.y_val_f0,
-                                                       ind.get_params(), self.seed, i))
-            # fold 1
-            ray_jobs.append(self.ray_train_func.remote(self.X_train_f1, self.y_train_f1, self.X_val_f1, self.y_val_f1,
-                                                       ind.get_params(), self.seed, i))
-            # fold 2
-            ray_jobs.append(self.ray_train_func.remote(self.X_train_f2, self.y_train_f2, self.X_val_f2, self.y_val_f2,
-                                                       ind.get_params(), self.seed, i))
-            # fold 3
-            ray_jobs.append(self.ray_train_func.remote(self.X_train_f3, self.y_train_f3, self.X_val_f3, self.y_val_f3,
-                                                       ind.get_params(), self.seed, i))
-            # fold 4
-            ray_jobs.append(self.ray_train_func.remote(self.X_train_f4, self.y_train_f4, self.X_val_f4, self.y_val_f4,
-                                                       ind.get_params(), self.seed, i))
+            ray_jobs.append(self.ray_train_func_cv.remote(self.cv_data_ref,
+                                                          ind.get_params(),
+                                                          self.seed,
+                                                          i))
 
-        # gather results as they complete
+        # Gather results as they complete
+        pop_results = {}
         while len(ray_jobs) > 0:
             finished, ray_jobs = ray.wait(ray_jobs)
-            id, t_acc, v_acc, err = ray.get(finished[0])
+            id, train_accs, val_accs, err = ray.get(finished[0])
             assert err > 0.0, "Error during model training/evaluation."
-            pop_results[id]['train_acc'].append(t_acc)
-            pop_results[id]['val_acc'].append(v_acc)
+            assert len(train_accs) == 5, f"Expected 5 train accuracies, got {len(train_accs)}"
+            assert len(val_accs) == 5, f"Expected 5 val accuracies, got {len(val_accs)}"
+            pop_results[id] = {'train_acc': train_accs, 'val_acc': val_accs}
 
-        # assign performances to individuals
+        # Assign performances to individuals
         for i, ind in enumerate(candidates):
-            assert len(pop_results[i]['train_acc']) == 5
-            assert len(pop_results[i]['val_acc']) == 5
             ind.set_train_performance(np.mean(pop_results[i]['train_acc']))
             ind.set_val_performance(np.mean(pop_results[i]['val_acc']))
 
