@@ -24,21 +24,23 @@ if __name__ == "__main__":
     # replicate number
     parser.add_argument('--rep', type=int, default=0, help='Replicate number.')
     # tournament size
-    parser.add_argument('--tournament_size', type=int, default=2, help='Tournament size for parent selection.')
+    parser.add_argument('--tournament_size', type=int, default=10, help='Tournament size for parent selection.')
     # variance for mutation
     parser.add_argument('--mutation_var', type=float, default=0.5, help='Variance for Gaussian mutation of parameters.')
     # mutation rate
     parser.add_argument('--mutation_rate', type=float, default=1.0, help='Mutation rate for offspring generation.')
     # number of generations
-    parser.add_argument('--gens', type=int, default=9, help='Number of generations to evolve.')
+    parser.add_argument('--gens', type=int, default=19, help='Number of generations to evolve.')
     # population size
     parser.add_argument('--pop_size', type=int, default=50, help='Population size.')
     # output directory
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # gamma for TPE
-    parser.add_argument('--gamma', type=float, default=0.5, help='Gamma parameter for TPE.')
+    parser.add_argument('--gamma', type=float, default=0.3, help='Gamma parameter for TPE.')
     # probability for TPE event
     parser.add_argument('--tpe_prob', type=float, default=0.5, help='Probability of event for TPE.')
+    # sliding window for archive
+    parser.add_argument('--window', type=int, default=200, help='Sliding window size for TPE archive.')
 
     args = parser.parse_args()
 
@@ -60,6 +62,7 @@ if __name__ == "__main__":
     print(f"Output Directory: {args.output_directory}")
     print(f"Optimizer: {args.optimizer}")
     print(f"Gamma (for TPE): {args.gamma}")
+    print(f"Window size (for TPE): {args.window}")
     print("=" * 60)
     print()
 
@@ -82,7 +85,8 @@ if __name__ == "__main__":
             split_dir=args.split_directory,
             output_dir=args.output_directory,
             gamma=args.gamma,
-            tpe_prob=args.tpe_prob
+            tpe_prob=args.tpe_prob,
+            window=args.window
             )
 
     # load dataset from openml

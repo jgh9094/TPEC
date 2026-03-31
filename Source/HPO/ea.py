@@ -32,7 +32,8 @@ class EA:
                  data_dir: str,
                  split_dir: str,
                  output_dir: str,
-                 gamma: float = 0.0) -> None:
+                 window: int,
+                 gamma: float = 0.0,) -> None:
         """
         Parameters:
             param_space (ModelParams): Model parameter space object that
@@ -65,6 +66,7 @@ class EA:
         self.tpe = TPE(gamma=gamma) # tpe object for tpe-based mutation, can be None
         self.best_perf = 0.0 # best performance seen so far
         self.tpe_prob = tpe_prob # probability of using tpe-based selection
+        self.window = window # sliding window size for archive
 
         # openml dataset loading
 
@@ -139,7 +141,7 @@ class EA:
         self.hard_eval_count += len(self.population)
 
         # update archive
-        self.update_archive(self.population)
+        self.update_archive(self.population, self.window)
 
         best_perf = max([ind.get_val_performance() for ind in self.population])
         print(f"Initial population size: {len(self.population)}", flush=True)
@@ -162,7 +164,7 @@ class EA:
             self.hard_eval_count += len(offspring)
 
             # update archive
-            self.update_archive(offspring)
+            self.update_archive(offspring, self.window)
 
             # Get best performance in current population
             current_best = max([ind.get_val_performance() for ind in self.population])
@@ -346,7 +348,7 @@ class EA:
         assert len(offspring) == len(parent_ids), "Number of offspring must match number of parents."
         return offspring
 
-    def update_archive(self, evaluated_individuals: List[Individual]) -> None:
+    def update_archive(self, evaluated_individuals: List[Individual], window: int) -> None:
         """
         Update the archive with newly evaluated individuals.
         This archive is used to find the best performing individuals for final test set evaluation.
@@ -364,4 +366,11 @@ class EA:
             tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
             tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
             self.tpe_archive.append(tpe_ind)
+
+        # sliding window: keep only the most recent `window` individuals
+        if len(self.archive) > window:
+            self.archive = self.archive[-window:]
+
+        if len(self.tpe_archive) > window:
+            self.tpe_archive = self.tpe_archive[-window:]
         return

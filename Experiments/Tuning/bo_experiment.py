@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # replicate number
     parser.add_argument('--rep', type=int, default=0, help='Replicate number.')
     # total evaluations
-    parser.add_argument('--total_evals', type=int, default=500, help='Total number of evaluations to perform.')
+    parser.add_argument('--total_evals', type=int, default=1000, help='Total number of evaluations to perform.')
     # top candidates
     parser.add_argument('--top_candidates', type=int, default=50, help='Number of top candidates to retain from sampled TPE set.')
     # number of offspring
@@ -29,7 +29,9 @@ if __name__ == "__main__":
     # output directory
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # gamma for TPE
-    parser.add_argument('--gamma', type=float, default=0.5, help='Gamma parameter for TPE.')
+    parser.add_argument('--gamma', type=float, default=0.3, help='Gamma parameter for TPE.')
+    # sliding window for archive
+    parser.add_argument('--window', type=int, default=200, help='Sliding window size for TPE archive.')
 
     args = parser.parse_args()
 
@@ -48,6 +50,7 @@ if __name__ == "__main__":
     print(f"Number of Offspring: {args.num_offspring}")
     print(f"Output Directory: {args.output_directory}")
     print(f"Gamma (for TPE): {args.gamma}")
+    print(f"Window size (for TPE): {args.window}")
     print("=" * 60)
     print()
 
@@ -66,7 +69,8 @@ if __name__ == "__main__":
             data_dir=args.data_directory,
             split_dir=args.split_directory,
             output_dir=args.output_directory,
-            gamma=args.gamma)
+            gamma=args.gamma,
+            window=args.window)
 
     # load dataset from openml
     bo.load_openml_dataset()

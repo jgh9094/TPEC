@@ -27,7 +27,8 @@ class BO:
                  rep: int,
                  data_dir: str,
                  split_dir: str,
-                 output_dir: str) -> None:
+                 output_dir: str,
+                 window: int) -> None:
         """
         Parameters:
             param_space (ModelParams): Model parameter space object that
@@ -56,6 +57,7 @@ class BO:
         self.hard_eval_count = 0 # evaluations on the true objective
         self.tpe = TPE(gamma=gamma) # tpe object for tpe-based mutation
         self.best_perf = 0.0 # best performance seen so far
+        self.window = window # sliding window size for archive
 
         # openml dataset loading
 
@@ -119,7 +121,7 @@ class BO:
 
         start_time = time.time()
 
-        # Initiale set of random individuals
+        # Initialize set of random individuals
         current_set = [Individual(self.param_space.generate_random_parameters(self.rng),self.param_space.get_model_type()) \
             for _ in range(self.top_candidates)]
 
@@ -130,7 +132,7 @@ class BO:
         self.hard_eval_count += len(current_set)
 
         # update archive
-        self.update_archive(current_set)
+        self.update_archive(current_set, self.window)
 
         best_perf = max([ind.get_val_performance() for ind in current_set])
         print(f"Initial set size: {len(current_set)}", flush=True)
@@ -161,7 +163,7 @@ class BO:
             self.hard_eval_count += len(current_set)
 
             # update archive
-            self.update_archive(current_set)
+            self.update_archive(current_set, self.window)
 
             # Get best performance in current set
             current_best = max([ind.get_val_performance() for ind in current_set])
@@ -284,7 +286,7 @@ class BO:
 
         return candidates
 
-    def update_archive(self, evaluated_individuals: List[Individual]) -> None:
+    def update_archive(self, evaluated_individuals: List[Individual], window: int) -> None:
         """
         Update the archive with newly evaluated individuals.
         This archive is used to find the best performing individuals for final test set evaluation.
@@ -292,6 +294,7 @@ class BO:
 
         Parameters:
             evaluated_individuals (List[Individual]): List of newly evaluated individuals.
+            window (int): Size of the sliding window.
         """
 
         for ind in evaluated_individuals:
@@ -304,4 +307,12 @@ class BO:
             tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
             tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
             self.tpe_archive.append(tpe_ind)
+
+        # sliding window: keep only the most recent `window` individuals
+        if len(self.archive) > window:
+            self.archive = self.archive[-window:]
+
+        if len(self.tpe_archive) > window:
+            self.tpe_archive = self.tpe_archive[-window:]
+
         return
