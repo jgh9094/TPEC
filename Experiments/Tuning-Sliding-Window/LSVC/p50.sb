@@ -5,11 +5,11 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --array=0-146
 #SBATCH --job-name=LSVC-p50
-#SBATCH -p moore,defq
-#SBATCH --exclude=esplhpc-cp040
+#SBATCH -p defq
 ###############################################################
 
 ########## Load Conda Environment ##########
+module purge
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
 
