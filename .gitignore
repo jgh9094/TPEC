@@ -14,3 +14,7 @@ Data/exp2.tar.gz
 Data-Tools/TPEC-Tuning/*/data.csv
 Data-Tools/TPEC-Tuning/*/_book
 Data-Tools/Sum-Of-Parts/*.csv
+
+
+*.zip
+Experiments/

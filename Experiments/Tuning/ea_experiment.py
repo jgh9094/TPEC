@@ -40,7 +40,7 @@ if __name__ == "__main__":
     # probability for TPE event
     parser.add_argument('--tpe_prob', type=float, default=0.5, help='Probability of event for TPE.')
     # sliding window for archive
-    parser.add_argument('--window', type=int, default=200, help='Sliding window size for TPE archive.')
+    parser.add_argument('--window', type=int, default=500, help='Sliding window size for TPE archive.')
 
     args = parser.parse_args()
 

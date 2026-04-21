@@ -30,8 +30,8 @@ if __name__ == "__main__":
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # gamma for TPE
     parser.add_argument('--gamma', type=float, default=0.3, help='Gamma parameter for TPE.')
-    # sliding window for archive
-    parser.add_argument('--window', type=int, default=200, help='Sliding window size for TPE archive.')
+    # sliding window for archive 
+    parser.add_argument('--window', type=int, default=500, help='Sliding window size for TPE archive.')
 
     args = parser.parse_args()
 

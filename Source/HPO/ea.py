@@ -173,8 +173,8 @@ class EA:
             print(f"Best performance so far (Gen {g+1}): {self.best_perf}", flush=True)
 
         # make sure that the archive is the correct size
-        assert len(self.archive) == self.hard_eval_count
-        assert len(self.archive) == self.gens * self.pop_size + self.pop_size
+        assert len(self.archive) <= self.window
+        # assert len(self.archive) == self.gens * self.pop_size + self.pop_size
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
         print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
         return
