@@ -1,0 +1,84 @@
+#!/bin/bash
+########## Define Resources Needed with SBATCH Lines ##########
+#SBATCH --time=01:00:00
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=1
+#SBATCH --array=0-881
+#SBATCH --job-name=LSVC-Diversity
+#SBATCH -p moore,defq
+#SBATCH --exclude=esplhpc-cp040
+###############################################################
+
+########## Load Conda Environment ##########
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+########## Define Variables ##########
+# Base directory for the repository
+BASE_DIR="/home/hernandezj45/Repos/GECCO-2026-TPEC"
+SCRIPT_PATH="${BASE_DIR}/Source/HPO/diversity.py"
+DATA_DIR="${BASE_DIR}/Data/Tuning/Results/LSVC"
+
+# Array of task IDs
+TASK_IDS=(task_359955 task_359956 task_359962 task_168911 task_190411 task_359968 task_359972)
+
+# Optimizers used
+OPTIMIZERS=(BO P0 P25 P50 P75 P100)
+
+# Number of replicates per task
+NUM_REPLICATES=21
+
+# Check if SLURM_ARRAY_TASK_ID is set (if running locally for testing, use 0)
+if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
+    SLURM_ARRAY_TASK_ID=0
+fi
+
+# Calculate indices from SLURM_ARRAY_TASK_ID
+# Total combinations: 7 tasks * 6 optimizers * 21 replicates = 882
+NUM_OPTIMIZERS=6
+TASK_INDEX=$((SLURM_ARRAY_TASK_ID / (NUM_OPTIMIZERS * NUM_REPLICATES)))
+REMAINING=$((SLURM_ARRAY_TASK_ID % (NUM_OPTIMIZERS * NUM_REPLICATES)))
+OPTIMIZER_INDEX=$((REMAINING / NUM_REPLICATES))
+REP=$((REMAINING % NUM_REPLICATES))
+
+TASK_ID=${TASK_IDS[$TASK_INDEX]}
+OPTIMIZER=${OPTIMIZERS[$OPTIMIZER_INDEX]}
+
+# Verify TASK_ID was set correctly
+if [ -z "${TASK_ID}" ]; then
+    echo "ERROR: TASK_ID is empty! TASK_INDEX=${TASK_INDEX}, SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+    exit 1
+fi
+
+# Set path to archive.csv
+ARCHIVE_PATH="${DATA_DIR}/${TASK_ID}/${OPTIMIZER}/Replicate_${REP}/archive.csv"
+
+# Check if archive.csv exists
+if [ ! -f "${ARCHIVE_PATH}" ]; then
+    echo "WARNING: Archive file not found: ${ARCHIVE_PATH}"
+    exit 0
+fi
+
+########## Print Job Information ##########
+echo "=================================================="
+echo "Job Information:"
+echo "SLURM_ARRAY_TASK_ID: ${SLURM_ARRAY_TASK_ID}"
+echo "Task ID: ${TASK_ID}"
+echo "Tournament Size: ${TOURNAMENT_SIZE}"
+echo "Replicate: ${REP}"
+echo "Archive Path: ${ARCHIVE_PATH}"
+echo "Model Type: ${MODEL_TYPE}"
+echo "=================================================="
+
+########## Run Diversity Computation ##########
+python "${SCRIPT_PATH}" --model_type LSVC --csv_path "${ARCHIVE_PATH}"
+
+########## Check Exit Status ##########
+if [ $? -eq 0 ]; then
+    echo "SUCCESS: Diversity computation completed for task_${TASK_ID}/${OPTIMIZER}/Replicate_${REP}"
+else
+    echo "ERROR: Diversity computation failed for task_${TASK_ID}/${OPTIMIZER}/Replicate_${REP}"
+    exit 1
+fi
+
+echo "Job completed successfully!"

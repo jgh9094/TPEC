@@ -1,0 +1,76 @@
+#!/bin/bash
+########## Define Resources Needed with SBATCH Lines ##########
+#SBATCH --time=01:00:00
+#SBATCH --mem=10G
+#SBATCH --cpus-per-task=12
+#SBATCH --array=0-146
+#SBATCH --job-name=gb-bo
+#SBATCH -p moore,defq
+#SBATCH --exclude=esplhpc-cp040
+###############################################################
+
+########## Load Conda Environment ##########
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+########## Define Variables ##########
+# Array of task IDs from tasks_summary.csv
+TASK_IDS=(359955 359956 359962 168911 190411 359968 359972)
+
+# Number of replicates per task
+NUM_REPLICATES=21
+
+# Check if SLURM_ARRAY_TASK_ID is set (if running locally for testing, use 0)
+if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
+    SLURM_ARRAY_TASK_ID=0
+fi
+
+# Calculate task_id and replicate from SLURM_ARRAY_TASK_ID
+TASK_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
+REP=$((SLURM_ARRAY_TASK_ID % NUM_REPLICATES))
+TASK_ID=${TASK_IDS[$TASK_INDEX]}
+
+# Verify TASK_ID was set correctly
+if [ -z "${TASK_ID}" ]; then
+    echo "ERROR: TASK_ID is empty! TASK_INDEX=${TASK_INDEX}, SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+    exit 1
+fi
+
+# Set paths (adjust these to your actual paths)
+BASE_DIR="/home/hernandezj45/Repos/GECCO-2026-TPEC"
+SCRIPT_PATH="${BASE_DIR}/Experiments/Tuning/bo_experiment.py"
+DATA_DIR="${BASE_DIR}/Data/Raw_OpenML_Suite_271_Binary_Classification"
+SPLIT_DIR="${BASE_DIR}/Data/Tuning/Splits"
+OUTPUT_DIR="${BASE_DIR}/Data/Tuning/Results/GB/task_${TASK_ID}/BO/Replicate_${REP}"
+SEED=$((REP)) # Offset seed to avoid overlap with other experiments
+
+########## Create Output Directory ##########
+mkdir -p ${OUTPUT_DIR}
+
+########## Change to Repository Directory ##########
+cd ${BASE_DIR}
+export PYTHONPATH="${BASE_DIR}:${PYTHONPATH}"
+
+########## Print Job Information ##########
+echo "======================================"
+echo "SLURM Job Information"
+echo "======================================"
+echo "Job ID: ${SLURM_JOB_ID}"
+echo "Array Task ID: ${SLURM_ARRAY_TASK_ID}"
+echo "Task Index: ${TASK_INDEX}"
+echo "Task ID: ${TASK_ID}"
+echo "Replicate: ${REP}"
+echo "Seed: ${SEED}"
+echo "Output Directory: ${OUTPUT_DIR}"
+echo "======================================"
+echo ""
+
+########## Execute Python Script ##########
+python ${SCRIPT_PATH} \
+    --model_config GB \
+    --seed ${SEED} \
+    --task_id ${TASK_ID} \
+    --data_directory ${DATA_DIR} \
+    --split_directory ${SPLIT_DIR} \
+    --rep ${REP} \
+    --output_directory ${OUTPUT_DIR}
