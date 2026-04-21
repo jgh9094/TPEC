@@ -5,25 +5,26 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --array=0-881
 #SBATCH --job-name=LSVC-Diversity
-#SBATCH -p moore,defq
-#SBATCH --exclude=esplhpc-cp040
+#SBATCH -p defq
 ###############################################################
 
 ########## Load Conda Environment ##########
+module purge
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
 
 ########## Define Variables ##########
 # Base directory for the repository
-BASE_DIR="/home/hernandezj45/Repos/GECCO-2026-TPEC"
+BASE_DIR="/mnt/home/suzuekar/GECCO-2026-TPEC"
 SCRIPT_PATH="${BASE_DIR}/Source/HPO/diversity.py"
-DATA_DIR="${BASE_DIR}/Data/Tuning/Results/LSVC"
+DATA_DIR="${BASE_DIR}/Data/Tuning-Sliding-Window/Results/LSVC"
 
 # Array of task IDs
 TASK_IDS=(task_359955 task_359956 task_359962 task_168911 task_190411 task_359968 task_359972)
 
 # Optimizers used
-OPTIMIZERS=(BO P0 P25 P50 P75 P100)
+# OPTIMIZERS=(BO P0 P25 P50 P75 P100)
+OPTIMIZERS=(P50)
 
 # Number of replicates per task
 NUM_REPLICATES=21
