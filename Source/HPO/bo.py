@@ -2,7 +2,7 @@ import numpy as np
 import ray
 from Source.Base.individual import Individual
 from typeguard import typechecked
-from typing import List, Dict
+from typing import List, Dict, Optional
 import copy as cp
 from Source.Base.tpe import TPE
 from Source.Base.data_utils import load_data, get_ray_cv_splits, preprocess_train_test
@@ -27,7 +27,8 @@ class BO:
                  rep: int,
                  data_dir: str,
                  split_dir: str,
-                 output_dir: str) -> None:
+                 output_dir: str,
+                 window: int) -> None:
         """
         Parameters:
             param_space (ModelParams): Model parameter space object that
@@ -55,7 +56,9 @@ class BO:
         self.tpe_archive: List[Individual] = [] # archive for tpe individuals
         self.hard_eval_count = 0 # evaluations on the true objective
         self.tpe = TPE(gamma=gamma) # tpe object for tpe-based mutation
-        self.best_perf = 0.0 # best performance seen so far
+        self.best_perf = float("-inf") # best performance seen so far
+        self.best_ind: Optional[Individual] = None # GLOBAL best, regardless of sliding window size
+        self.window = window # sliding window size for archive
 
         # openml dataset loading
 
@@ -119,7 +122,7 @@ class BO:
 
         start_time = time.time()
 
-        # Initiale set of random individuals
+        # Initialize set of random individuals
         current_set = [Individual(self.param_space.generate_random_parameters(self.rng),self.param_space.get_model_type()) \
             for _ in range(self.top_candidates)]
 
@@ -130,11 +133,13 @@ class BO:
         self.hard_eval_count += len(current_set)
 
         # update archive
-        self.update_archive(current_set)
+        self.update_archive(current_set, self.window)
 
-        best_perf = max([ind.get_val_performance() for ind in current_set])
+        # keep track of best
+        self.update_best_seen(current_set)
+        # best_perf = max([ind.get_val_performance() for ind in current_set])
         print(f"Initial set size: {len(current_set)}", flush=True)
-        print(f"Best performance so far: {best_perf}", flush=True)
+        print(f"Best performance so far: {self.best_perf}", flush=True)
 
         # start evolution
         while self.hard_eval_count < self.total_evals:
@@ -161,17 +166,18 @@ class BO:
             self.hard_eval_count += len(current_set)
 
             # update archive
-            self.update_archive(current_set)
+            self.update_archive(current_set, self.window)
 
             # Get best performance in current set
-            current_best = max([ind.get_val_performance() for ind in current_set])
-            if current_best > self.best_perf:
-                self.best_perf = current_best
+            # current_best = max([ind.get_val_performance() for ind in current_set])
+            # if current_best > self.best_perf:
+            #     self.best_perf = current_best
+            self.update_best_seen(current_set)
             print(f"Best performance so far: {self.best_perf}", flush=True)
 
         # make sure that the archive is the correct size
-        assert len(self.archive) == self.hard_eval_count
-        assert len(self.archive) == self.total_evals
+        assert len(self.archive) <= self.window
+        # assert len(self.archive) == self.total_evals
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
         print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
         return
@@ -186,11 +192,22 @@ class BO:
         """
 
         # Iterate through archive to get all set of best performers
-        best_performers = [pos for pos, ind in enumerate(self.archive) if ind.get_val_performance() == self.best_perf]
+        # best_performers = [pos for pos, ind in enumerate(self.archive) if ind.get_val_performance() == self.best_perf]
+
+        # Get rid of exact float equality
+        tol = 1e-12
+        best_performers = [
+            pos for pos, ind in enumerate(self.archive)
+            if abs(ind.get_val_performance() - self.best_perf) <= tol
+        ]
         print(f"Number of best performers in archive: {len(best_performers)}", flush=True)
 
-        # randomly select one of the best performers for final test evaluation
-        best_individual = cp.deepcopy(self.archive[self.rng.choice(best_performers)])
+        if len(best_performers) > 0:
+            # randomly select one of the best performers for final test evaluation
+            best_individual = cp.deepcopy(self.archive[self.rng.choice(best_performers)])
+        else:
+            assert self.best_ind is not None, "No stored global best individual."
+            best_individual = cp.deepcopy(self.best_ind)
 
         # fit best individual on full training data and evaluate on test set
         X_train_transformed, y_train, X_test_transformed, y_test = preprocess_train_test(self.X_train,
@@ -284,7 +301,7 @@ class BO:
 
         return candidates
 
-    def update_archive(self, evaluated_individuals: List[Individual]) -> None:
+    def update_archive(self, evaluated_individuals: List[Individual], window: int) -> None:
         """
         Update the archive with newly evaluated individuals.
         This archive is used to find the best performing individuals for final test set evaluation.
@@ -292,6 +309,7 @@ class BO:
 
         Parameters:
             evaluated_individuals (List[Individual]): List of newly evaluated individuals.
+            window (int): Size of the sliding window.
         """
 
         for ind in evaluated_individuals:
@@ -304,4 +322,19 @@ class BO:
             tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
             tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
             self.tpe_archive.append(tpe_ind)
+
+        # sliding window: keep only the most recent `window` individuals
+        if len(self.archive) > window:
+            self.archive = self.archive[-window:]
+
+        if len(self.tpe_archive) > window:
+            self.tpe_archive = self.tpe_archive[-window:]
+
         return
+    
+    def update_best_seen(self, individuals: List[Individual]) -> None:
+        for ind in individuals:
+            perf = ind.get_val_performance()
+            if perf > self.best_perf:
+                self.best_perf = perf
+                self.best_ind = cp.deepcopy(ind)
