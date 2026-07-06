@@ -7,14 +7,6 @@ Source/HPO/__pycache__/
 Source/Base/__pycache__/
 Source/CASH/__pycache__/
 main.py
-Data/Exp1
-Data/exp1.tar.gz
-Data/Exp2
-Data/exp2.tar.gz
-Data-Tools/TPEC-Tuning/*/data.csv
-Data-Tools/TPEC-Tuning/*/_book
-Data-Tools/Sum-Of-Parts/*.csv
 
-
+Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
 *.zip
-Experiments/
