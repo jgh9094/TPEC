@@ -1,21 +1,23 @@
 import ray
 import numpy as np
 from typing import Dict, Any, Tuple
-from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC, LinearSVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import roc_auc_score, log_loss
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
 
 @ray.remote
-def train_random_forest(
+def cv_random_forest(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_validate: np.ndarray,
     y_validate: np.ndarray,
     model_params: Dict[str, Any],
     random_state: int,
-    id: int
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
 ) -> Tuple[int, float, float, float]:
     """
     Train and evaluate a RandomForestClassifier using Ray.
@@ -28,105 +30,39 @@ def train_random_forest(
         model_params: Dictionary of hyperparameters for RandomForestClassifier
         random_state: Random seed for reproducibility
         id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
 
     Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
+        Tuple of (id, training_auc, validation_auc, error)
         error: 1.0 if successful, -1.0 if error occurred
     """
     try:
         model = RandomForestClassifier(**model_params, random_state=random_state)
         model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
+            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
-        print(f"Error in train_decision_tree: {e}")
+        print(f"Error in cv_random_forest: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
-def train_linear_svc(
+def cv_kernel_svc(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_validate: np.ndarray,
     y_validate: np.ndarray,
     model_params: Dict[str, Any],
     random_state: int,
-    id: int
-) -> Tuple[int, float, float, float]:
-    """
-    Train and evaluate a LinearSVC using Ray.
-
-    Parameters:
-        X_train: Training features
-        y_train: Training labels
-        X_validate: Validation features
-        y_validate: Validation labels
-        model_params: Dictionary of hyperparameters for LinearSVC
-        random_state: Random seed for reproducibility
-        id: Identifier for this model instance
-
-    Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
-        error: 1.0 if successful, -1.0 if error occurred
-    """
-    try:
-        model = LinearSVC(**model_params, random_state=random_state)
-        model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
-        return id, train_acc, val_acc, 1.0
-
-    except Exception as e:
-        print(f"Error in train_linear_svc: {e}")
-        return id, 0.0, 0.0, -1.0
-
-@ray.remote
-def train_decision_tree(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_validate: np.ndarray,
-    y_validate: np.ndarray,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, float, float, float]:
-    """
-    Train and evaluate a DecisionTreeClassifier using Ray.
-
-    Parameters:
-        X_train: Training features
-        y_train: Training labels
-        X_validate: Validation features
-        y_validate: Validation labels
-        model_params: Dictionary of hyperparameters for DecisionTreeClassifier
-        random_state: Random seed for reproducibility
-        id: Identifier for this model instance
-
-    Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
-        error: 1.0 if successful, -1.0 if error occurred
-    """
-    try:
-        model = DecisionTreeClassifier(**model_params, random_state=random_state)
-        model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
-        return id, train_acc, val_acc, 1.0
-
-    except Exception as e:
-        print(f"Error in train_decision_tree: {e}")
-        return id, 0.0, 0.0, -1.0
-
-@ray.remote
-def train_kernel_svc(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_validate: np.ndarray,
-    y_validate: np.ndarray,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
 ) -> Tuple[int, float, float, float]:
     """
     Train and evaluate a SVC (Kernel SVM) using Ray.
@@ -139,68 +75,39 @@ def train_kernel_svc(
         model_params: Dictionary of hyperparameters for SVC
         random_state: Random seed for reproducibility
         id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
 
     Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
+        Tuple of (id, training_auc, validation_auc, error)
         error: 1.0 if successful, -1.0 if error occurred
     """
     try:
-        model = SVC(**model_params, random_state=random_state)
+        model = SVC(**model_params, random_state=random_state, probability=True)
         model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
+            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
-        print(f"Error in train_kernel_svc: {e}")
+        print(f"Error in cv_kernel_svc: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
-def train_extra_trees(
+def cv_gradient_boost(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_validate: np.ndarray,
     y_validate: np.ndarray,
     model_params: Dict[str, Any],
     random_state: int,
-    id: int
-) -> Tuple[int, float, float, float]:
-    """
-    Train and evaluate an ExtraTreesClassifier using Ray.
-
-    Parameters:
-        X_train: Training features
-        y_train: Training labels
-        X_validate: Validation features
-        y_validate: Validation labels
-        model_params: Dictionary of hyperparameters for ExtraTreesClassifier
-        random_state: Random seed for reproducibility
-        id: Identifier for this model instance
-
-    Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
-        error: 1.0 if successful, -1.0 if error occurred
-    """
-    try:
-        model = ExtraTreesClassifier(**model_params, random_state=random_state)
-        model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
-        return id, train_acc, val_acc, 1.0
-
-    except Exception as e:
-        print(f"Error in train_decision_tree: {e}")
-        return id, 0.0, 0.0, -1.0
-
-@ray.remote
-def train_gradient_boost(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_validate: np.ndarray,
-    y_validate: np.ndarray,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
 ) -> Tuple[int, float, float, float]:
     """
     Train and evaluate a GradientBoostingClassifier using Ray.
@@ -213,349 +120,124 @@ def train_gradient_boost(
         model_params: Dictionary of hyperparameters for GradientBoostingClassifier
         random_state: Random seed for reproducibility
         id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
 
     Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
+        Tuple of (id, training_auc, validation_auc, error)
         error: 1.0 if successful, -1.0 if error occurred
     """
     try:
         model = GradientBoostingClassifier(**model_params, random_state=random_state)
         model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
+            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
-        print(f"Error in train_gradient_boost: {e}")
+        print(f"Error in cv_gradient_boost: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
-def train_linear_sgd(
+def cv_knn(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_validate: np.ndarray,
     y_validate: np.ndarray,
     model_params: Dict[str, Any],
-    random_state: int,
-    id: int
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
 ) -> Tuple[int, float, float, float]:
     """
-    Train and evaluate a SGDClassifier using Ray.
+    Train and evaluate a KNeighborsClassifier using Ray.
 
     Parameters:
         X_train: Training features
         y_train: Training labels
         X_validate: Validation features
         y_validate: Validation labels
-        model_params: Dictionary of hyperparameters for SGDClassifier
-        random_state: Random seed for reproducibility
+        model_params: Dictionary of hyperparameters for KNeighborsClassifier
         id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
 
     Returns:
-        Tuple of (id, training_accuracy, validation_accuracy, error)
+        Tuple of (id, training_auc, validation_auc, error)
         error: 1.0 if successful, -1.0 if error occurred
     """
     try:
-        model = SGDClassifier(**model_params, random_state=random_state)
+        model = KNeighborsClassifier(**model_params)
         model.fit(X_train, y_train)
-        train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-        val_acc = float(accuracy_score(y_validate, model.predict(X_validate)))
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
+            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
-        print(f"Error in train_linear_sgd: {e}")
+        print(f"Error in cv_knn: {e}")
         return id, 0.0, 0.0, -1.0
 
-
-# ============================================================================
-# Consolidated CV Functions - Process all 5 folds in a single task
-# ============================================================================
-
 @ray.remote
-def train_random_forest_cv(
-    cv_data: Tuple,
+def cv_mlp(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
     model_params: Dict[str, Any],
     random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
+) -> Tuple[int, float, float, float]:
     """
-    Train and evaluate RandomForestClassifier across all 5 CV folds in one task.
+    Train and evaluate a MLPClassifier using Ray.
 
     Parameters:
-        cv_data: Tuple of (X_train_f0, y_train_f0, X_val_f0, y_val_f0, ..., X_train_f4, y_train_f4, X_val_f4, y_val_f4)
-        model_params: Dictionary of hyperparameters
-        random_state: Random seed
+        X_train: Training features
+        y_train: Training labels
+        X_validate: Validation features
+        y_validate: Validation labels
+        model_params: Dictionary of hyperparameters for MLPClassifier
+        random_state: Random seed for reproducibility
         id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
 
     Returns:
-        Tuple of (id, list of train accuracies, list of val accuracies, error)
+        Tuple of (id, training_auc, validation_auc, error)
+        error: 1.0 if successful, -1.0 if error occurred
     """
     try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
+        layers = (model_params.get('layer_1'),
+                  model_params.get('layer_2'),
+                  model_params.get('layer_3'),
+                  model_params.get('layer_4'),
+                  model_params.get('layer_5'))
 
-        train_accs = []
-        val_accs = []
+        model = MLPClassifier(hidden_layer_sizes=layers,
+                              activation=model_params.get('activation'),
+                              solver=model_params.get('solver'),
+                              max_iter=model_params.get('max_iter'),
+                              random_state=random_state)
+        model.fit(X_train, y_train)
 
-        # Process all 5 folds
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
+            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
 
-            model = RandomForestClassifier(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
+        return id, train_acc, val_acc, 1.0
 
     except Exception as e:
-        print(f"Error in train_random_forest_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_linear_svc_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate LinearSVC across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = LinearSVC(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_linear_svc_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_decision_tree_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate DecisionTreeClassifier across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = DecisionTreeClassifier(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_decision_tree_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_kernel_svc_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate SVC (Kernel SVM) across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = SVC(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_kernel_svc_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_extra_trees_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate ExtraTreesClassifier across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = ExtraTreesClassifier(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_extra_trees_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_gradient_boost_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate GradientBoostingClassifier across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = GradientBoostingClassifier(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_gradient_boost_cv: {e}")
-        return id, [], [], -1.0
-
-
-@ray.remote
-def train_linear_sgd_cv(
-    cv_data: Tuple,
-    model_params: Dict[str, Any],
-    random_state: int,
-    id: int
-) -> Tuple[int, list, list, float]:
-    """
-    Train and evaluate SGDClassifier across all 5 CV folds in one task.
-    """
-    try:
-        # Dereference Ray ObjectRefs if needed
-        if isinstance(cv_data[0], ray.ObjectRef):
-            cv_data = tuple(ray.get(list(cv_data)))
-
-        train_accs = []
-        val_accs = []
-
-        for fold in range(5):
-            idx = fold * 4
-            X_train = cv_data[idx]
-            y_train = cv_data[idx + 1]
-            X_val = cv_data[idx + 2]
-            y_val = cv_data[idx + 3]
-
-            model = SGDClassifier(**model_params, random_state=random_state)
-            model.fit(X_train, y_train)
-            train_acc = float(accuracy_score(y_train, model.predict(X_train)))
-            val_acc = float(accuracy_score(y_val, model.predict(X_val)))
-
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-
-        return id, train_accs, val_accs, 1.0
-
-    except Exception as e:
-        print(f"Error in train_linear_sgd_cv: {e}")
-        return id, [], [], -1.0
+        print(f"Error in cv_mlp: {e}")
+        return id, 0.0, 0.0, -1.0

@@ -10,7 +10,6 @@ from typeguard import typechecked
 from typing import Dict, Any, Tuple
 from sklearn.model_selection import train_test_split
 from openml import tasks
-from openml.study import get_suite
 
 @typechecked
 def get_ray_cv_splits(rep_dir: str, X_train: pd.DataFrame, y_train: np.ndarray, task_id: int, data_dir: str):
@@ -91,61 +90,6 @@ def get_ray_cv_splits(rep_dir: str, X_train: pd.DataFrame, y_train: np.ndarray, 
            X_train_f4, X_val_f4, y_train_f4, y_val_f4
 
 @typechecked
-def get_suite_task_ids(suite_id: int = 271):
-    """Return the list of task IDs in the given OpenML benchmark suite."""
-    suite = get_suite(suite_id)  # OpenMLBenchmarkSuite object
-    return suite.tasks  # list of task IDs (ints)
-
-@typechecked
-def is_binary_classification_task(task):
-    """
-    Check whether a given OpenML task is a binary classification task.
-    Assumes the task is a supervised classification task.
-    """
-    # For classification tasks, there is a target feature with a finite set of class labels
-    dataset = task.get_dataset()
-    target_name = task.target_name
-
-    # Load only the target column to inspect #classes without loading full data
-    _, y, _, _ = dataset.get_data(
-        target=target_name,
-        dataset_format="dataframe"
-    )
-
-    # Drop missing labels if any to count actual classes
-    unique_classes = pd.Series(y).dropna().unique()
-    return len(unique_classes) == 2
-
-@typechecked
-def load_task_dataset(task):
-    """
-    Load the full dataset for a task into a pandas DataFrame.
-    Returns (df, target_name, has_missing, minority_pct, majority_pct).
-    """
-    dataset = task.get_dataset()
-    target_name = task.target_name
-
-    X, y, _, _ = dataset.get_data(
-        target=target_name,
-        dataset_format="dataframe"
-    )
-
-    # Combine X and y into a single DataFrame
-    df = X.copy()
-    df[target_name] = y
-    has_missing = df.isna().any().any()
-
-    # Calculate class percentages
-    class_counts = pd.Series(y).value_counts()
-    total_count = len(y)
-    minority_count = class_counts.min()
-    majority_count = class_counts.max()
-    minority_pct = (minority_count / total_count) * 100
-    majority_pct = (majority_count / total_count) * 100
-
-    return df, target_name, has_missing, minority_pct, majority_pct
-
-@typechecked
 def create_train_test_stratified_splits(
     task_id: int,
     data_dir: str,
@@ -216,54 +160,6 @@ def create_train_test_stratified_splits(
     print(f"  Saved to: {splits_dir}")
 
     return train_indices, test_indices
-
-@typechecked
-def train_test_random_forrest(X_train: np.ndarray,
-                              y_train: np.ndarray,
-                              X_test: np.ndarray,
-                              y_test: np.ndarray,
-                              model_params: Dict[str, Any],
-                              random_state: int) -> Tuple[float, float]:
-    """
-    Train and evaluate a Random Forest classifier.
-
-    Parameters:
-    -----------
-    X_train : np.ndarray
-        Training features (preprocessed)
-    y_train : np.ndarray
-        Training labels
-    X_test : np.ndarray
-        Testing features (preprocessed)
-    y_test : np.ndarray
-        Testing labels
-    n_estimators : int
-        Number of trees in the forest
-    max_depth : int
-        Maximum depth of the tree
-    random_state : int
-        Random seed for reproducibility
-
-    Returns:
-    --------
-    train_accuracy : float
-        Accuracy on the training set
-    test_accuracy : float
-        Accuracy on the testing set
-    """
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import accuracy_score
-
-    clf = RandomForestClassifier(**model_params,random_state=random_state)
-    clf.fit(X_train, y_train)
-
-    y_train_pred = clf.predict(X_train)
-    y_test_pred = clf.predict(X_test)
-
-    train_accuracy = float(accuracy_score(y_train, y_train_pred))
-    test_accuracy = float(accuracy_score(y_test, y_test_pred))
-
-    return train_accuracy, test_accuracy
 
 @typechecked
 def load_data(

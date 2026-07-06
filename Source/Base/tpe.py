@@ -34,27 +34,6 @@ class MultivariateKDE:
         if n <= d:
             raise ValueError(f"Not enough samples for multivariate KDE: n={n}, d={d}")
 
-        # If there is only 1 sample (n=1), KDE will fail
-        # if n == 1:
-        #     data = np.hstack([data, data + 1e-3]) # duplicate it slightly
-
-        # cov = np.cov(data, rowvar=True, bias=False)
-        # rank = np.linalg.matrix_rank(cov)
-
-        # Another full rank check - add small noise to escape colinearity and constant dimensions
-        # if rank < d:
-        #     # Scale noise relative to each feature's spread
-        #     per_dim_std = np.std(data, axis=1, ddof=1) # (d, )
-        #     per_dim_std = np.maximum(per_dim_std, 1e-6) # make sure std is not 0
-        #     Z = rng.normal(size=data.shape) # this should be the same shape as data
-        #     noise = Z * (1e-3 * per_dim_std[:, None])            
-        #     data = data + noise
-
-        #     # Recheck rank
-        #     cov = np.cov(data, rowvar=True, bias=False)
-        #     if np.linalg.matrix_rank(cov) < d:
-        #         raise ValueError("Still rank-deficient after adding noise.")
-
         # Rank checking is too strict/is a proxy, just try
         try:
             self.kde = gaussian_kde(data, bw_method='silverman')
@@ -63,7 +42,7 @@ class MultivariateKDE:
             per_dim_std = np.std(data, axis=1, ddof=1) # (d, )
             per_dim_std = np.maximum(per_dim_std, 1e-6) # make sure std is not 0
             Z = rng.normal(size=data.shape) # this should be the same shape as data
-            noise = Z * (1e-3 * per_dim_std[:, None])            
+            noise = Z * (1e-3 * per_dim_std[:, None])
             data = data + noise
 
             try:
