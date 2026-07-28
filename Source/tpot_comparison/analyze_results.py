@@ -6,9 +6,10 @@ import pandas as pd
 
 def analyze_results(taskids, num_reps, base_save_folder):
     all_scores = {}
-    for t, taskid in enumerate(taskids):
-        train_accuracies = []
-        test_accuracies = []
+    for taskid in taskids:
+        train_scores = []
+        test_scores = []
+        metric = None
         num_successes = 0
         num_failures = 0
 
@@ -20,8 +21,9 @@ def analyze_results(taskids, num_reps, base_save_folder):
             if os.path.exists(result_file):
                 with open(result_file, "rb") as f:
                     scores = pickle.load(f)
-                train_accuracies.append(scores['train_accuracy'])
-                test_accuracies.append(scores['test_accuracy'])
+                train_scores.append(scores['train_score'])
+                test_scores.append(scores['test_score'])
+                metric = scores['metric']
                 num_successes += 1
             elif os.path.exists(failed_file):
                 num_failures += 1
@@ -32,20 +34,21 @@ def analyze_results(taskids, num_reps, base_save_folder):
             else:
                 continue  # Neither success nor failure recorded
 
-        # Compute averages
-        avg_train_acc = np.mean(train_accuracies) if train_accuracies else 0.0
-        avg_test_acc = np.mean(test_accuracies) if test_accuracies else 0.0
+        avg_train_score = np.mean(train_scores) if train_scores else 0.0
+        avg_test_score = np.mean(test_scores) if test_scores else 0.0
 
         all_scores[taskid] = {
-            'avg_train_accuracy': avg_train_acc,
-            'avg_test_accuracy': avg_test_acc,
+            'avg_train_score': avg_train_score,
+            'avg_test_score': avg_test_score,
+            'metric': metric,
             'num_successes': num_successes,
             'num_failures': num_failures
         }
 
         print(f"Task {taskid}:")
-        print(f"  Average Train Accuracy: {avg_train_acc:.4f}")
-        print(f"  Average Test Accuracy: {avg_test_acc:.4f}")
+        print(f"  Metric: {metric or 'N/A'}")
+        print(f"  Average Train Score: {avg_train_score:.4f}")
+        print(f"  Average Test Score: {avg_test_score:.4f}")
         print(f"  Number of Successes: {num_successes}")
         print(f"  Number of Failures: {num_failures}")
         print()
@@ -55,38 +58,9 @@ def analyze_results(taskids, num_reps, base_save_folder):
 
 
 if __name__ == "__main__":
-    taskids=taskids = [190412, 146818, 359955, 168757, 359956, 359958, 359962, 190137, 168911, 359965, 190411, 146820, 359968, 359975, 359972, 168350, 359971]
-    
+    data_directory = "Data/Raw_OpenML_Suite_271_Classification"
+    summary = pd.read_csv(os.path.join(data_directory, "tasks_summary.csv"))
+    taskids = summary['task_id'].astype(int).tolist()
     num_reps = 10
     base_save_folder = "Results/tpot"
-    
-    results = analyze_results(taskids, num_reps, base_save_folder)
-
-    # Compare against results from Data/Raw_OpenML_Suite_271_Binary_Classification/tasks_summary.csv
-    random_runs_df = pd.read_csv("Data/Raw_OpenML_Suite_271_Binary_Classification/tasks_summary.csv")
-
-    # read relevant columns: task_id, DT,ET,GB,KSVC,LSGD,LSVC,RF
-    relevant_columns = ['task_id', 'DT', 'ET', 'GB', 'KSVC', 'LSGD', 'LSVC', 'RF']
-    random_runs_df = random_runs_df[relevant_columns]
-
-    # make a dictionary where each element is task_id: {"max": max(random_runs_df[DT], random_runs_df[ET], ...), ], "avg": avg(...)}
-    random_runs_summary = {}
-    for index, row in random_runs_df.iterrows():
-        task_id = row['task_id']
-        accuracies = [row['DT'], row['ET'], row['GB'], row['KSVC'], row['LSGD'], row['LSVC'], row['RF']]
-        max_acc = np.max(accuracies)
-        avg_acc = np.mean(accuracies)
-        random_runs_summary[task_id] = {
-            'max_accuracy': max_acc,
-            'avg_accuracy': avg_acc
-        }
-    # Compare results
-    for taskid in taskids:
-        tpot_test_acc = results[taskid]['avg_test_accuracy']
-        random_max_acc = random_runs_summary[taskid]['max_accuracy']
-        random_avg_acc = random_runs_summary[taskid]['avg_accuracy']
-        print(f"Task {taskid} Comparison:")
-        print(f"  TPOT Average Test Accuracy: {tpot_test_acc:.4f}")
-        print(f"  Random Runs Max Accuracy: {random_max_acc:.4f}")
-        print(f"  Random Runs Average Accuracy: {random_avg_acc:.4f}")
-        print()
+    analyze_results(taskids, num_reps, base_save_folder)

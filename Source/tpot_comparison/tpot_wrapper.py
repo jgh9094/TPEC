@@ -1,209 +1,270 @@
-import numpy as np
-import tpot
-import sklearn
-from sklearn.metrics import accuracy_score
-from Source.tpot_comparison.param_space_conversion import generate_tpot_search_space
-from functools import partial
-from Source.Base.data_utils import load_data, preprocess_train_test
-from typing import List
-import os
-import time
-import random
-import pickle
-import traceback
 import argparse
-from Source.tpot_comparison.prepare_data_for_tpot import get_splits
+import os
+import pickle
+import random
+import time
+import traceback
+from functools import partial
+from typing import List
 
-def custom_objective_function(estimator, X_train_splits, X_val_splits, y_train_splits, y_val_splits):
-    assert len(X_train_splits) == 5, f"Expected 5 train splits, got {len(X_train_splits)}"
-    assert len(X_val_splits) == 5, f"Expected 5 val splits, got {len(X_val_splits)}"
+import numpy as np
+import pandas as pd
+import tpot
+from sklearn.base import clone
+from sklearn.compose import ColumnTransformer
+from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from Source.tpot_comparison.param_space_conversion import generate_tpot_search_space
+
+
+def load_task_data(task_id, data_directory, train_size, seed):
+    """Load and split a dataset using the current CASH data format."""
+    summary = pd.read_csv(os.path.join(data_directory, "tasks_summary.csv"))
+    task_summary = summary.loc[summary["task_id"] == task_id]
+    if task_summary.empty:
+        raise ValueError(f"Task {task_id} is missing from tasks_summary.csv")
+
+    data = pd.read_csv(os.path.join(data_directory, f"task_{task_id}.csv"))
+    target_name = (
+        task_summary.iloc[0]["target_name"]
+        if "target_name" in task_summary
+        else data.columns[-1]
+    )
+    X = data.drop(columns=[target_name])
+    y = data[target_name].to_numpy()
+    classes = (
+        int(task_summary.iloc[0]["num_classes"])
+        if "num_classes" in task_summary
+        else len(np.unique(y))
+    )
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        train_size=train_size,
+        random_state=seed,
+        shuffle=True,
+        stratify=y,
+    )
+
+    indicator_path = os.path.join(
+        data_directory, f"task_{task_id}_categorical_indicator.pkl"
+    )
+    if os.path.exists(indicator_path):
+        with open(indicator_path, "rb") as file:
+            categorical_indicator = pickle.load(file)
+    else:
+        categorical_indicator = [
+            isinstance(dtype, pd.CategoricalDtype)
+            or pd.api.types.is_object_dtype(dtype)
+            or pd.api.types.is_bool_dtype(dtype)
+            for dtype in X.dtypes
+        ]
+    return X_train, X_test, y_train, y_test, categorical_indicator, classes
+
+
+def make_preprocessor(X, categorical_indicator):
+    categorical_cols = [col for col, is_cat in zip(X.columns, categorical_indicator) if is_cat]
+    numerical_cols = [col for col, is_cat in zip(X.columns, categorical_indicator) if not is_cat]
+    return ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), numerical_cols),
+            ("cat", OneHotEncoder(drop=None, sparse_output=False, handle_unknown="ignore"), categorical_cols),
+        ],
+        remainder="passthrough",
+    )
+
+
+def get_splits(X_train, y_train, categorical_indicator, seed):
+    """Create the same preprocessed five-fold splits used by current CASH."""
+    splits = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed).split(X_train, y_train)
+    X_train_splits, X_val_splits = [], []
+    y_train_splits, y_val_splits = [], []
+
+    for train_indices, val_indices in splits:
+        X_fold_train = X_train.iloc[train_indices].reset_index(drop=True)
+        X_fold_val = X_train.iloc[val_indices].reset_index(drop=True)
+        preprocessor = make_preprocessor(X_fold_train, categorical_indicator)
+        X_train_splits.append(preprocessor.fit_transform(X_fold_train))
+        X_val_splits.append(preprocessor.transform(X_fold_val))
+        y_train_splits.append(y_train[train_indices])
+        y_val_splits.append(y_train[val_indices])
+
+    return X_train_splits, X_val_splits, y_train_splits, y_val_splits
+
+
+def objective_score(estimator, X, y, classes):
+    probabilities = estimator.predict_proba(X)
+    if classes == 2:
+        return roc_auc_score(y, probabilities[:, 1])
+    return -log_loss(y, probabilities, labels=np.arange(classes))
+
+
+def custom_objective_function(
+    estimator,
+    X_train_splits,
+    X_val_splits,
+    y_train_splits,
+    y_val_splits,
+    classes,
+):
     scores = []
-    for index in range(5):
-        X_train, X_val = X_train_splits[index], X_val_splits[index]
-        y_train, y_val = y_train_splits[index], y_val_splits[index]
-        assert len(X_train) > 0, f"Empty training set at fold {index}"
-        assert len(X_val) > 0, f"Empty validation set at fold {index}"
+    for X_train, X_val, y_train, y_val in zip(
+        X_train_splits, X_val_splits, y_train_splits, y_val_splits
+    ):
+        fold_pipeline = clone(estimator)
+        fold_pipeline.fit(X_train, y_train)
+        score = objective_score(fold_pipeline, X_val, y_val, classes)
+        complexity = tpot.objectives.complexity_scorer(fold_pipeline)
+        scores.append([score, complexity])
 
-        this_fold_pipeline = sklearn.base.clone(estimator)
-        this_fold_pipeline.fit(X_train, y_train)
-        y_pred = this_fold_pipeline.predict(X_val)
-        acc = accuracy_score(y_val, y_pred)
-        complexity = tpot.objectives.complexity_scorer(this_fold_pipeline)
-        scores.append([acc, complexity])
-
-    return np.mean(scores, axis=0)  # Return mean accuracy and complexity across folds
+    return np.mean(scores, axis=0)
 
 
-def tpot_loop_through_tasks(taskids:List[int], data_directory: str, split_directory: str, base_save_folder, num_reps, ga_params):
-    
-    for t, taskid in enumerate(taskids):
-        for r in range(num_reps):
-            save_folder = f"{base_save_folder}/{taskid}/Rep_{r}"
-            time.sleep(random.random()*5)
+def tpot_loop_through_tasks(
+    taskids: List[int],
+    data_directory: str,
+    base_save_folder: str,
+    num_reps: int,
+    ga_params: dict,
+    train_size: float = 0.8,
+):
+    for task_index, task_id in enumerate(taskids):
+        for rep in range(num_reps):
+            save_folder = os.path.join(base_save_folder, str(task_id), f"Rep_{rep}")
+            time.sleep(random.random() * 5)
             if os.path.exists(save_folder):
                 continue
-            else:
-                os.makedirs(save_folder)
+            os.makedirs(save_folder)
 
-                print("Working on ")
-                print(save_folder)
+            seed = task_index * 1000 + rep
+            print(f"Working on {save_folder}")
+            print(f"Super Seed: {seed}")
 
-                super_seed = t*1000+r
-                print("Super Seed : ", super_seed)
-                
-                # indicies for train/test split for a given task and replicate
-                rep_dir = os.path.join(split_directory, f"task_{taskid}", f"Replicate_{r}")
-                assert os.path.exists(rep_dir), f"Replicate directory does not exist: {rep_dir}"
-                X_train, X_test, y_train, y_test = load_data(taskid, data_directory, rep_dir)
-                assert len(X_train) > 0, f"Empty training data for task {taskid}, rep {r}"
-                assert len(X_test) > 0, f"Empty test data for task {taskid}, rep {r}"
-                assert X_train.shape[1] == X_test.shape[1], f"Train/test feature mismatch: {X_train.shape[1]} vs {X_test.shape[1]}"
-                # Get CV splits for custom objective
-                X_train_splits, X_val_splits, y_train_splits, y_val_splits = get_splits(taskid, r, data_directory, split_directory)
-                assert len(X_train_splits) == 5, f"Expected 5 CV splits, got {len(X_train_splits)}"
-                
-                custom_objective = partial(custom_objective_function, X_train_splits=X_train_splits, X_val_splits=X_val_splits, y_train_splits=y_train_splits, y_val_splits=y_val_splits)
-                custom_objective.__name__ = 'custom_objective'
-                
-                try:
-                    linear_est = tpot.TPOTEstimator(
-                                            search_space=ga_params["search_space"],
-                                            scorers=[],
-                                            scorers_weights=[],
-                                            other_objective_functions=[custom_objective],
-                                            other_objective_functions_weights=[1, -1],
-                                            objective_function_names = ['accuracy', 'complexity'],
-                                            population_size=ga_params["population_size"],
-                                            generations=ga_params["generations"],
-                                            classification = True,
-                                            max_eval_time_mins = 1440, # 24 hours per evaluation  
-                                            max_time_mins = None,
-                                            n_jobs=ga_params['n_jobs'],
-                                            verbose=5,
-                                            random_state=super_seed,
-                                            )
+            try:
+                X_train, X_test, y_train, y_test, categorical_indicator, classes = load_task_data(
+                    task_id, data_directory, train_size, seed
+                )
+                X_train_splits, X_val_splits, y_train_splits, y_val_splits = get_splits(
+                    X_train, y_train, categorical_indicator, seed
+                )
+                custom_objective = partial(
+                    custom_objective_function,
+                    X_train_splits=X_train_splits,
+                    X_val_splits=X_val_splits,
+                    y_train_splits=y_train_splits,
+                    y_val_splits=y_val_splits,
+                    classes=classes,
+                )
+                custom_objective.__name__ = "custom_objective"
 
-                          # fit best individual on full training data and evaluate on test set
-                    X_train_transformed, y_train, X_test_transformed, y_test = preprocess_train_test(X_train,
-                                                                                         y_train,
-                                                                                         X_test,
-                                                                                         y_test,
-                                                                                         taskid,
-                                                                                         data_directory)
-                    assert len(X_train_transformed) > 0, f"Empty training data for task {taskid}, rep {r}"
-                    assert len(X_test_transformed) > 0, f"Empty test data for task {taskid}, rep {r}"
-                    assert X_train_transformed.shape[1] == X_test_transformed.shape[1], f"Train/test feature mismatch: {X_train.shape[1]} vs {X_test.shape[1]}"
+                estimator = tpot.TPOTEstimator(
+                    search_space=generate_tpot_search_space(classes, ga_params["n_jobs"]),
+                    scorers=[],
+                    scorers_weights=[],
+                    other_objective_functions=[custom_objective],
+                    other_objective_functions_weights=[1, -1],
+                    objective_function_names=["score", "complexity"],
+                    population_size=ga_params["population_size"],
+                    generations=ga_params["generations"],
+                    classification=True,
+                    disable_label_encoder=True,
+                    max_eval_time_mins=1440,
+                    max_time_mins=None,
+                    n_jobs=ga_params["n_jobs"],
+                    verbose=5,
+                    random_state=seed,
+                )
 
-                    linear_est.fit(X_train_transformed, y_train)
-                    print("Ending the fitting process. ")
-                    assert hasattr(linear_est, 'fitted_pipeline_'), "TPOT fitting failed - no fitted_pipeline_ attribute"
-                    best_pipeline = linear_est.fitted_pipeline_
-                    assert best_pipeline is not None, "Fitted pipeline is None"
-                    
-                    accuracy_scorer = sklearn.metrics.get_scorer("accuracy")
-                    
-                    # If y in not in [0,1,...N], TPOT encodes labels for classification tasks; using the same encoding here
-                    if linear_est.label_encoder_ is not None:
-                        y_train = linear_est.label_encoder_.fit_transform(y_train)
-                        y_test = linear_est.label_encoder_.transform(y_test)
+                preprocessor = make_preprocessor(X_train, categorical_indicator)
+                X_train_transformed = preprocessor.fit_transform(X_train)
+                X_test_transformed = preprocessor.transform(X_test)
+                estimator.fit(X_train_transformed, y_train)
 
-                    train_accuracy = accuracy_scorer(best_pipeline, X_train_transformed, y_train)
-                    train_score = {"train_accuracy": train_accuracy}
-                    test_accuracy = accuracy_scorer(best_pipeline, X_test_transformed, y_test)
-                    test_score = {"test_accuracy": test_accuracy}
+                best_pipeline = estimator.fitted_pipeline_
+                train_score = objective_score(best_pipeline, X_train_transformed, y_train, classes)
+                test_score = objective_score(best_pipeline, X_test_transformed, y_test, classes)
+                evaluated_individuals = estimator.evaluated_individuals
 
-                    complexity = tpot.objectives.complexity_scorer(best_pipeline)
-                    test_score["complexity"] = complexity
+                classifier_counts = {}
+                for pipeline in evaluated_individuals["Instance"]:
+                    classifier_name = pipeline.__class__.__name__
+                    classifier_counts[classifier_name] = classifier_counts.get(classifier_name, 0) + 1
 
-    
-                    print("Ending the scoring process. ")
+                result = {
+                    "train_score": train_score,
+                    "test_score": test_score,
+                    "metric": "roc_auc" if classes == 2 else "negative_log_loss",
+                    "complexity": tpot.objectives.complexity_scorer(best_pipeline),
+                    "pipeline": best_pipeline,
+                    "seed": seed,
+                    "run": rep,
+                    "classifier_distribution": classifier_counts,
+                    "num_evaluated_individuals": len(evaluated_individuals),
+                }
+                with open(os.path.join(save_folder, "scores.pkl"), "wb") as file:
+                    pickle.dump(result, file)
+                return
 
-                    this_score = {}
-                    this_score.update(train_score)
-                    this_score.update(test_score)
+            except Exception as error:
+                failure = {
+                    "error": str(error),
+                    "trace": traceback.format_exc(),
+                    "seed": seed,
+                    "run": rep,
+                }
+                print(f"Failed on {save_folder}")
+                print(failure["trace"])
+                with open(os.path.join(save_folder, "failed.pkl"), "wb") as file:
+                    pickle.dump(failure, file)
+                return
 
-                    this_score["pipeline"] = best_pipeline
-                    this_score["seed"] = super_seed
-                    this_score["run"] = r
-
-                    # Also save the distribution of classifers in all evaluated individuals
-                    all_eval_inds = linear_est.evaluated_individuals
-
-                    # all_eval_inds is a pandas dataframe with 'Instance' column storing sklearn pipelines
-                    
-                    # Extract classifier distribution from evaluated individuals
-                    classifier_counts = {}
-                    for _, row in all_eval_inds.iterrows():
-                        pipeline = row['Instance'] # Pipeline is just a single classifier here
-                        classifier_name = pipeline.__class__.__name__  # Get the classifier name
-                        if classifier_name in classifier_counts:
-                            classifier_counts[classifier_name] += 1
-                        else:
-                            classifier_counts[classifier_name] = 1
-
-                    this_score["classifier_distribution"] = classifier_counts
-                    this_score["num_evaluated_individuals"] = len(all_eval_inds)
-
-                    with open(f"{save_folder}/scores.pkl", "wb") as f:
-                        pickle.dump(this_score, f)
-
-                    return           
-                
-                except Exception as e:
-                    trace =  traceback.format_exc()
-                    pipeline_failure_dict = {"error": str(e), "trace": trace, "seed": super_seed, "run": r}
-                    print("failed on ")
-                    print(save_folder)
-                    print(e)
-                    print(trace)
-
-                    with open(f"{save_folder}/failed.pkl", "wb") as f:
-                        pickle.dump(pipeline_failure_dict, f)
-
-                    return
-        
     print("all finished")
 
+
 if __name__ == "__main__":
-    # get configs for running EA
-    parser = argparse.ArgumentParser(description="Run EA HPO")
-    parser.add_argument('--num_cpus', type=int, default=4, help='Number of CPUs to use')
-    parser.add_argument('--machine', type=str, default='local', help='Machine identifier')
-    parser.add_argument('--num_reps', type=int, default=21, help='Number of Replicates')
+    parser = argparse.ArgumentParser(description="Run TPOT CASH comparison")
+    parser.add_argument("--num_cpus", type=int, default=4, help="Number of CPUs to use")
+    parser.add_argument("--machine", type=str, default="local", help="Machine identifier")
+    parser.add_argument("--num_reps", type=int, default=10, help="Number of replicates")
+    parser.add_argument("--train_size", type=float, default=0.8, help="Training proportion")
+    parser.add_argument("--data_directory", type=str, default=None, help="Dataset directory")
     args = parser.parse_args()
-    num_cpus = args.num_cpus
-    machine = args.machine
-    num_reps = args.num_reps
 
-    classes = 2  # Binary classification
-    
-    # Search space the same for all TPOT runs
-    tpot_search_space = generate_tpot_search_space(classes, num_cpus)
+    assert args.num_cpus > 0
+    assert args.num_reps > 0
+    assert 0 < args.train_size < 1
 
-    gp_params_remote = {
-        "population_size": 100,
-        "generations": 20,
-        "search_space": tpot_search_space,
-        "n_jobs": num_cpus,
+    ga_params = {
+        "population_size": 100 if args.machine == "remote" else 10,
+        "generations": 20 if args.machine == "remote" else 5,
+        "n_jobs": args.num_cpus,
     }
-    gp_params_local = {
-        "population_size": 10,
-        "generations": 5,
-        "search_space": tpot_search_space,
-        "n_jobs": num_cpus,
-    }
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    data_directories = [
+        os.path.join(project_root, "Data", "Raw_OpenML_Suite_271_Classification"),
+        os.path.join(project_root, "Data", "Raw_OpenML_Suite_271_Binary_Classification"),
+    ]
+    data_directory = args.data_directory or next(
+        (path for path in data_directories if os.path.exists(path)), None
+    )
+    base_save_folder = os.path.join(project_root, "Results", "tpot")
+    assert data_directory is not None and os.path.exists(data_directory), (
+        "Data directory does not exist. Pass it with --data_directory."
+    )
 
-    data_directory = "./Data/Raw_OpenML_Suite_271_Binary_Classification"
-    split_directory = "./Data/Timing_Splits"
-    base_save_folder = "Results/tpot"
-    taskids = [190412, 146818, 359955, 168757, 359956, 359958, 359962, 190137, 168911, 359965, 190411, 146820, 359968, 359975, 359972, 168350, 359971]
-    assert os.path.exists(data_directory), f"Data directory does not exist: {data_directory}"
-    assert os.path.exists(split_directory), f"Split directory does not exist: {split_directory}"
-    assert num_cpus > 0, f"Invalid num_cpus: {num_cpus}"
-    assert num_reps > 0, f"Invalid num_reps: {num_reps}"
-    print(f"Starting TPOT experiments with {num_cpus} CPUs, {num_reps} replicates on {machine}")
-    
-    if machine == 'remote':
-        tpot_loop_through_tasks(taskids, data_directory, split_directory, base_save_folder, num_reps, gp_params_remote)
-    else:
-        tpot_loop_through_tasks(taskids, data_directory, split_directory, base_save_folder, num_reps, gp_params_local)
+    summary = pd.read_csv(os.path.join(data_directory, "tasks_summary.csv"))
+    taskids = summary["task_id"].astype(int).tolist()
+    print(
+        f"Starting TPOT experiments with {args.num_cpus} CPUs, "
+        f"{args.num_reps} replicates on {args.machine}"
+    )
+    tpot_loop_through_tasks(
+        taskids,
+        data_directory,
+        base_save_folder,
+        args.num_reps,
+        ga_params,
+        args.train_size,
+    )
