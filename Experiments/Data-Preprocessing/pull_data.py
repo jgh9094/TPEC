@@ -57,8 +57,7 @@ def load_task_dataset(task):
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Pull binary classification datasets from OpenML suite 271')
-    parser.add_argument('--save-dir', type=str, default='',
-                        help='Directory path to append to the default output directory name')
+    parser.add_argument('--save-dir', type=str, help='Directory path to append to the default output directory name')
     args = parser.parse_args()
 
     # Maximum thresholds for filtering datasets (set to None to disable filtering)
