@@ -245,20 +245,20 @@ class RandomForestParams(ModelParams):
             Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
         """
         # If 'bootstrap' is True, 'max_samples' must have a numeric value within bounds
-        if model_params['bootstrap'] is True:
-            bounds = self.param_space['max_samples']['bounds']
-            assert(model_params['max_samples'] is not None
-                   and bounds[0] <= model_params['max_samples'] <= bounds[1])
+        # if model_params['bootstrap'] is True:
+        #     bounds = self.param_space['max_samples']['bounds']
+        #     assert(model_params['max_samples'] is not None
+        #            and bounds[0] <= model_params['max_samples'] <= bounds[1])
 
-        # If 'bootstrap' is False, 'max_samples' must be None
-        if model_params['bootstrap'] is False:
-            assert(model_params['max_samples'] is None)
+        # # If 'bootstrap' is False, 'max_samples' must be None
+        # if model_params['bootstrap'] is False:
+        #     assert(model_params['max_samples'] is None)
 
         model_params_copy = copy.deepcopy(model_params)
 
-        if model_params_copy['max_samples'] is None:
-            # if bootstrap is False, set max_samples to 1.0 (100% of data being used)
-            model_params_copy['max_samples'] = 1.0
+        # if model_params_copy['max_samples'] is None:
+        #     # if bootstrap is False, set max_samples to 1.0 (100% of data being used)
+        #     model_params_copy['max_samples'] = 1.0
 
         return model_params_copy
 

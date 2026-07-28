@@ -1,258 +1,102 @@
 ##########################################################################################
 #
 # Class dedicated to the evolutionary algorithm (EA) optimization of hyperparameters for machine learning models.
+# This CASH (Combined Algorithm Selection and Hyperparameter optimization) EA inherits from BaseEA.
 #
 ##########################################################################################
 
 import numpy as np
-import pandas as pd
-import os
 import ray
-import sklearn as skl
 import numpy.typing as npt
 import copy as cp
 
 from typeguard import typechecked
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+
 from Source.Base import model_param_space
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from openml import tasks
-from sklearn.metrics import roc_auc_score, log_loss
-
-
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neural_network import MLPClassifier
-
+from Source.Base.base_ea import BaseEA
 from Source.Base.ray_utils import cv_random_forest, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp
 from Source.Base.model_param_space import RandomForestParams, KernelSVCParams, GradientBoostParams, KNeighborsClassifierParams, MLPClassifierParams
-from .bo_ray_utils import bo_rf_optimizer, bo_ksvc_optimizer, bo_gb_optimizer, bo_knn_optimizer, bo_mlp_optimizer
+from Source.Base.individual import Individual
 import Source.CASH.nsag_toolset as nsga
 
+from .bo_ray_utils import bo_rf_optimizer, bo_ksvc_optimizer, bo_gb_optimizer, bo_knn_optimizer, bo_mlp_optimizer
+
+
 @typechecked
-class EA:
+class EA(BaseEA):
+    """
+    CASH (Combined Algorithm Selection and Hyperparameter optimization) EA.
+    Extends BaseEA with multi-model support and Bayesian optimization-guided acquisition functions.
+    """
+
     def __init__(self,
                  seed: int,
                  pop_size: int,
                  cores: int,
                  mut_prob: float,
                  mut_var: float,
-                 save_directory: str,
                  initial_history_size: int) -> None:
         """
-        Initializes the EA class with the provided parameters.
+        Initializes the CASH EA class with the provided parameters.
 
         Args:
             seed (int): Random seed for reproducibility.
             pop_size (int): Population size for the evolutionary algorithm.
             cores (int): Number of CPU cores to use for parallel processing.
+            mut_prob (float): Mutation probability for the evolutionary algorithm.
             mut_var (float): Mutation variance for the evolutionary algorithm.
-            save_directory (str): Directory to save results.
             initial_history_size (int): Size of the initial history per model for the Bayesian optimizer.
         """
-        # quick sanity checks
-        assert seed >= 0, "Seed must be a non-negative integer."
-        assert pop_size > 0, "Population size must be a positive integer."
-        assert cores > 0, "Number of cores must be a positive integer."
-        assert 0.0 <= mut_var, "Mutation variance must be non-negative."
-        assert 0.0 <= mut_prob <= 1.0, "Mutation probability must be between 0 and 1    ."
+        # initialize the base class
+        super().__init__(
+            seed=seed,
+            pop_size=pop_size,
+            cores=cores,
+            mut_prob=mut_prob,
+            mut_var=mut_var
+        )
+
+        # CASH-specific validation
         assert initial_history_size > 0, "Initial history size must be a positive integer."
-
-        # global paramters for the EA and BO optimization process
-        self.SOLUTION_TYPE = 'SOLUTION_TYPE'
-        self.SOLUTION_PARAMS = 'SOLUTION_PARAMS'
-        self.SOLUTION_VALIDATION_SCORE = 'SOLUTION_VALIDATION_SCORE'
-        self.SOLUTION_TRAIN_SCORE = 'SOLUTION_TRAIN_SCORE'
-        self.SOLUTION_UCB = 'SOLUTION_UCB'
-        self.SOLUTION_EI = 'SOLUTION_EI'
-        self.SOLUTION_PI = 'SOLUTION_PI'
-
-        # save the parameters
-        self.seed = seed
-        self.pop_size = pop_size
-        self.cores = cores
-        self.save_directory = save_directory
         self.initial_history_size = initial_history_size
-        self.rng = np.random.default_rng(seed)
 
-        # variables tracked during the optimization process
-        self.total_evaluations = 0
+        # CASH-specific history tracking for Bayesian optimization (per model type)
         self.rf_history = {'n_estimators': [], 'criterion': [], 'max_depth': [], 'max_features': [], 'max_samples': [], 'class_weight': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
         self.ksvc_history = {'C': [], 'kernel': [], 'max_iter': [], 'class_weight': [], 'decision_function_shape': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
         self.gb_history = {'loss': [], 'learning_rate': [], 'n_estimators': [], 'subsample': [], 'criterion': [], 'max_depth': [], 'max_features': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
         self.knn_history = {'n_neighbors': [], 'weights': [], 'algorithm': [], 'leaf_size': [], 'p': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
         self.mlp_history = {'layer_1': [], 'layer_2': [], 'layer_3': [], 'layer_4': [], 'layer_5': [], 'activation': [], 'solver': [], 'max_iter': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
 
-        # ea specific variables
-        self.population = []
-        self.mut_prob = mut_prob
-        self.mut_var = mut_var
+        # best individual tracking
+        self.best_perf = float("-inf")
+        self.best_ind: Optional[Individual] = None
+
         return
 
-    def load_data(self,
-                  task_id: int,
-                  data_dir: str,
-                  train_p: float) -> None:
+    def evolve(self, gens: int, ucb: bool, pi: bool, ei: bool) -> None:
         """
-        Loads the dataset for the specified OpenML task ID and applies preprocessing.
-        data_dir must contain task_{task_id}.csv and tasks_summary.csv files.
+        Evolves the hyperparameters for all model types over a given number of generations.
+        This function optimizes all 3 acquisition functions (UCB, EI, PI) simultaneously using NSGA-II.
 
         Args:
-            task_id (int): OpenML task ID to load dataset from.
-            data_dir (str): Directory where datasets are stored.
-            train_p (float): Proportion of the dataset to use for training.
+            gens (int): Number of generations to evolve.
+            ucb (bool): Whether to use Upper Confidence Bound for selection.
+            pi (bool): Whether to use Probability of Improvement for selection.
+            ei (bool): Whether to use Expected Improvement for selection.
         """
-        # quick sanity checks
-        assert task_id > 0, "Task ID must be a positive integer."
-        assert os.path.exists(data_dir), f"Data directory '{data_dir}' does not exist."
-        assert os.path.exists(os.path.join(data_dir, f"task_{task_id}.csv")), f"Dataset file for task {task_id} not found."
-        assert os.path.exists(os.path.join(data_dir, f"tasks_summary.csv")), f"Summary file for task {task_id} not found."
-
-        # store task_id for later use
-        self.task_id = task_id
-
-        # load the summary CSV
-        summary_csv = pd.read_csv(os.path.join(data_dir, f"tasks_summary.csv"))
-
-        # find the row corresponding to the specified task_id
-        tasks_summary_row = summary_csv[summary_csv['task_id'] == task_id]
-        assert not tasks_summary_row.empty, f"No summary information found for task {task_id}."
-
-        # extract target_name to know which column is the target variable
-        target_name = tasks_summary_row['target_name'].values[0]
-        assert target_name is not None, f"Target name for task {task_id} is missing in the summary."
-
-        # extract the number of classes to determine if it's a binary or multi-class classification problem
-        num_classes = tasks_summary_row['num_classes'].values[0]
-        assert num_classes is not None, f"Number of classes for task {task_id} is missing in the summary."
-        self.binary_classification = bool(num_classes == 2)
-
-        # load the specified dataset
-        self.data_set = pd.read_csv(os.path.join(data_dir, f"task_{task_id}.csv"))
-
-        # split the dataset into features and target
-        X = self.data_set.drop(columns=[target_name])
-        y = self.data_set[target_name].values
-
-        # make a list of all unique classes in the target variable
-        self.labels = np.unique(y)
-
-        # generate an initial train-test split for the evolutionary algorithm (train_p is the proportion of the dataset to use for training)
-        self.X_train, self.X_test, self.y_train, self.y_test = skl.model_selection.train_test_split(
-            X, y, train_size=train_p, random_state=self.seed, shuffle=True, stratify=y
-        )
-
-        # generate a 5-fold cross-validation split for the evolutionary algorithm based on the training set and store the indices for each fold
-        self.cv_splits = list(skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed).split(self.X_train, self.y_train))
-
-        # get the categorical indicator from OpenML
-        task = tasks.get_task(task_id)
-        dataset = task.get_dataset()
-        categorical_indicator = dataset.get_data()[2]  # (X, y, categorical_indicator, attribute_names)
-
-        # identify categorical and numerical columns based on the categorical indicator and store for later use
-        self.categorical_cols = [col for col, is_cat in zip(self.X_train.columns, categorical_indicator) if is_cat]
-        self.numerical_cols = [col for col, is_cat in zip(self.X_train.columns, categorical_indicator) if not is_cat]
-
-        # use local references for the rest of this method
-        categorical_cols = self.categorical_cols
-        numerical_cols = self.numerical_cols
-
-        # generate each fold's train and validation sets with preprocessing
-        # fold 1
-        X_train_f1_raw = self.X_train.iloc[self.cv_splits[0][0]].reset_index(drop=True)
-        X_val_f1_raw = self.X_train.iloc[self.cv_splits[0][1]].reset_index(drop=True)
-
-        preprocessor_f1 = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-            ],
-            remainder='passthrough'
-        )
-        self.X_train_f1_rf = ray.put(preprocessor_f1.fit_transform(X_train_f1_raw))
-        self.X_val_f1_rf = ray.put(preprocessor_f1.transform(X_val_f1_raw))
-        self.y_train_f1_rf = ray.put(self.y_train[self.cv_splits[0][0]])
-        self.y_val_f1_rf = ray.put(self.y_train[self.cv_splits[0][1]])
-
-        # fold 2
-        X_train_f2_raw = self.X_train.iloc[self.cv_splits[1][0]].reset_index(drop=True)
-        X_val_f2_raw = self.X_train.iloc[self.cv_splits[1][1]].reset_index(drop=True)
-
-        preprocessor_f2 = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-            ],
-            remainder='passthrough'
-        )
-        self.X_train_f2_rf = ray.put(preprocessor_f2.fit_transform(X_train_f2_raw))
-        self.X_val_f2_rf = ray.put(preprocessor_f2.transform(X_val_f2_raw))
-        self.y_train_f2_rf = ray.put(self.y_train[self.cv_splits[1][0]])
-        self.y_val_f2_rf = ray.put(self.y_train[self.cv_splits[1][1]])
-
-        # fold 3
-        X_train_f3_raw = self.X_train.iloc[self.cv_splits[2][0]].reset_index(drop=True)
-        X_val_f3_raw = self.X_train.iloc[self.cv_splits[2][1]].reset_index(drop=True)
-
-        preprocessor_f3 = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-            ],
-            remainder='passthrough'
-        )
-        self.X_train_f3_rf = ray.put(preprocessor_f3.fit_transform(X_train_f3_raw))
-        self.X_val_f3_rf = ray.put(preprocessor_f3.transform(X_val_f3_raw))
-        self.y_train_f3_rf = ray.put(self.y_train[self.cv_splits[2][0]])
-        self.y_val_f3_rf = ray.put(self.y_train[self.cv_splits[2][1]])
-
-        # fold 4
-        X_train_f4_raw = self.X_train.iloc[self.cv_splits[3][0]].reset_index(drop=True)
-        X_val_f4_raw = self.X_train.iloc[self.cv_splits[3][1]].reset_index(drop=True)
-
-        preprocessor_f4 = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-            ],
-            remainder='passthrough'
-        )
-        self.X_train_f4_rf = ray.put(preprocessor_f4.fit_transform(X_train_f4_raw))
-        self.X_val_f4_rf = ray.put(preprocessor_f4.transform(X_val_f4_raw))
-        self.y_train_f4_rf = ray.put(self.y_train[self.cv_splits[3][0]])
-        self.y_val_f4_rf = ray.put(self.y_train[self.cv_splits[3][1]])
-
-        # fold 5
-        X_train_f5_raw = self.X_train.iloc[self.cv_splits[4][0]].reset_index(drop=True)
-        X_val_f5_raw = self.X_train.iloc[self.cv_splits[4][1]].reset_index(drop=True)
-
-        preprocessor_f5 = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-            ],
-            remainder='passthrough'
-        )
-        self.X_train_f5_rf = ray.put(preprocessor_f5.fit_transform(X_train_f5_raw))
-        self.X_val_f5_rf = ray.put(preprocessor_f5.transform(X_val_f5_raw))
-        self.y_train_f5_rf = ray.put(self.y_train[self.cv_splits[4][0]])
-        self.y_val_f5_rf = ray.put(self.y_train[self.cv_splits[4][1]])
-
+        if ucb and pi and ei:
+            print("Evolving with all acquisition functions (UCB, PI, EI) using NSGA-II.")
+            self.evolve_3d(gens=gens)
         return
 
     def evolve_3d(self, gens: int) -> None:
         """
-        Evolves the hyperparameters for the specified model type over a given number of generations.
-        This function assumes that we are optimizing all 3 acquisition functions (UCB, EI, PI) simultaneously for the NSGA-II algorithm.
+        Evolves the hyperparameters for all model types over a given number of generations.
+        This function optimizes all 3 acquisition functions (UCB, EI, PI) simultaneously using NSGA-II.
 
         Args:
             gens (int): Number of generations to evolve.
-            ucb (bool): Whether to use Upper Confidence Bound acquisition function.
-            ei (bool): Whether to use Expected Improvement acquisition function.
-            pi (bool): Whether to use Probability of Improvement acquisition function.
         """
         # quick sanity checks
         assert gens > 0, "Number of generations must be a positive integer."
@@ -304,11 +148,11 @@ class EA:
             self.population = [offspring[i] for i in survivor_ids]
 
             # compute performance metrics for the current generation
-            rf_models, ksvc_models, gb_models, knn_models, mlp_models = [ind[self.SOLUTION_PARAMS] for ind in self.population if ind[self.SOLUTION_TYPE] == 'rf'], \
-                [ind[self.SOLUTION_PARAMS] for ind in self.population if ind[self.SOLUTION_TYPE] == 'ksvc'], \
-                [ind[self.SOLUTION_PARAMS] for ind in self.population if ind[self.SOLUTION_TYPE] == 'gb'], \
-                [ind[self.SOLUTION_PARAMS] for ind in self.population if ind[self.SOLUTION_TYPE] == 'knn'], \
-                [ind[self.SOLUTION_PARAMS] for ind in self.population if ind[self.SOLUTION_TYPE] == 'mlp']
+            rf_models, ksvc_models, gb_models, knn_models, mlp_models = [ind.get_params() for ind in self.population if ind.model_type == 'rf'], \
+                [ind.get_params() for ind in self.population if ind.model_type == 'ksvc'], \
+                [ind.get_params() for ind in self.population if ind.model_type == 'gb'], \
+                [ind.get_params() for ind in self.population if ind.model_type == 'knn'], \
+                [ind.get_params() for ind in self.population if ind.model_type == 'mlp']
 
             rf_models, ksvc_models, gb_models, knn_models, mlp_models = self.evaluation(rf_models, ksvc_models, gb_models, knn_models, mlp_models)
 
@@ -373,7 +217,11 @@ class EA:
 
         return
 
-    def update_history(self, rf_models: List[Dict], ksvc_models: List[Dict], gb_models: List[Dict], knn_models: List[Dict], mlp_models: List[Dict]) -> None:
+    def update_history(self, rf_models: List[Dict],
+                       ksvc_models: List[Dict],
+                       gb_models: List[Dict],
+                       knn_models: List[Dict],
+                       mlp_models: List[Dict]) -> None:
         """
         Updates the history of evaluated hyperparameter configurations for each model type.
         """
@@ -457,39 +305,44 @@ class EA:
     def initialize_population(self) -> None:
         """
         Initializes the starting population for the evolutionary algorithm (EA) by generating a set of random hyperparameter configurations for each model type.
-        Models types and parameters are randomly generated based on self.rng, the defined parameter spaces in model_param_space.py, and self.pop_size.
+        Each model type gets an equal number of individuals, with the remainder distributed evenly across model types.
         """
 
         # quick sanity checks
         assert self.pop_size > 0, "Population size must be a positive integer."
         assert len(self.population) == 0, "Population has already been initialized."
 
-        for _ in range(self.pop_size):
-            # randomly select a model type for this individual in the population
-            model_type = self.rng.choice(['rf', 'ksvc', 'gb', 'knn', 'mlp'])
+        model_types = ['rf', 'ksvc', 'gb', 'knn', 'mlp']
+        num_models = len(model_types)
+        base_count = self.pop_size // num_models
+        remainder = self.pop_size % num_models
 
-            # generate random hyperparameters for the selected model type
-            if model_type == 'rf':
-                params = model_param_space.RandomForestParams().generate_random_parameters(self.rng)
-            elif model_type == 'ksvc':
-                params = model_param_space.KernelSVCParams().generate_random_parameters(self.rng)
-            elif model_type == 'gb':
-                params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).generate_random_parameters(self.rng)
-            elif model_type == 'knn':
-                params = model_param_space.KNeighborsClassifierParams().generate_random_parameters(self.rng)
-            elif model_type == 'mlp':
-                params = model_param_space.MLPClassifierParams().generate_random_parameters(self.rng)
-            else:
-                raise ValueError(f"Unknown model type: {model_type}")
+        # shuffle model types to randomize which ones get the extra individuals from remainder
+        shuffled_types = list(model_types)
+        self.rng.shuffle(shuffled_types)
 
-            # add the individual to the population
-            self.population.append({self.SOLUTION_TYPE: model_type, # what type of model this individual represents
-                                    self.SOLUTION_PARAMS: params, # what are the hyperparameters for this individual
-                                    self.SOLUTION_UCB: None, # what is the UCB score for this individual (to be computed later)
-                                    self.SOLUTION_EI: None, # what is the EI score for this individual (to be computed later)
-                                    self.SOLUTION_PI: None, # what is the PI score for this individual (to be computed later)
-                                    self.SOLUTION_VALIDATION_SCORE: None, # what is the validation score for this individual (to be computed later)
-                                    })
+        for i, model_type in enumerate(shuffled_types):
+            # each model type gets base_count individuals, plus 1 extra if within the remainder
+            count = base_count + (1 if i < remainder else 0)
+
+            for _ in range(count):
+                # generate random hyperparameters for the selected model type
+                if model_type == 'rf':
+                    params = model_param_space.RandomForestParams().generate_random_parameters(self.rng)
+                elif model_type == 'ksvc':
+                    params = model_param_space.KernelSVCParams().generate_random_parameters(self.rng)
+                elif model_type == 'gb':
+                    params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).generate_random_parameters(self.rng)
+                elif model_type == 'knn':
+                    params = model_param_space.KNeighborsClassifierParams().generate_random_parameters(self.rng)
+                elif model_type == 'mlp':
+                    params = model_param_space.MLPClassifierParams().generate_random_parameters(self.rng)
+                else:
+                    raise ValueError(f"Unknown model type: {model_type}")
+
+                # add the individual to the population
+                self.population.append(Individual(params=params, model_type=model_type))
+
         assert len(self.population) == self.pop_size, "Population size mismatch after initialization."
 
         # compute the acquisition scores for the initial population based on the current history of evaluated hyperparameter configurations
@@ -497,13 +350,13 @@ class EA:
 
         return
 
-    def compute_acquisition_scores(self, population) -> None:
+    def compute_acquisition_scores(self, population: List[Individual]) -> None:
         """
         Computes the acquisition scores (UCB, EI, PI) for each individual in the population based on the current history of evaluated hyperparameter configurations.
         The computed scores are stored in the corresponding fields of each individual in the provided population.
 
         Args:
-            population (list): List of individuals for which to compute acquisition scores.
+            population (List[Individual]): List of individuals for which to compute acquisition scores.
         """
 
         # quick sanity checks
@@ -517,17 +370,17 @@ class EA:
 
         # iterate through the population and group individuals by model type for acquisition score computation
         for idx, individual in enumerate(population):
-            model_type = individual[self.SOLUTION_TYPE]
+            model_type = individual.model_type
             if model_type == 'rf':
-                rf_list.append((idx, individual[self.SOLUTION_PARAMS]))
+                rf_list.append((idx, individual.get_params()))
             elif model_type == 'ksvc':
-                ksvc_list.append((idx, individual[self.SOLUTION_PARAMS]))
+                ksvc_list.append((idx, individual.get_params()))
             elif model_type == 'gb':
-                gb_list.append((idx, individual[self.SOLUTION_PARAMS]))
+                gb_list.append((idx, individual.get_params()))
             elif model_type == 'knn':
-                knn_list.append((idx, individual[self.SOLUTION_PARAMS]))
+                knn_list.append((idx, individual.get_params()))
             elif model_type == 'mlp':
-                mlp_list.append((idx, individual[self.SOLUTION_PARAMS]))
+                mlp_list.append((idx, individual.get_params()))
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
 
@@ -634,37 +487,31 @@ class EA:
                 acquisition_scores, model_type = ray.get(done_id)
                 if model_type == 'rf':
                     for idx, score in zip([idx for idx, _ in rf_list], acquisition_scores):
-                        population[idx][self.SOLUTION_UCB] = score['ucb']
-                        population[idx][self.SOLUTION_EI] = score['ei']
-                        population[idx][self.SOLUTION_PI] = score['pi']
+                        population[idx].set_ucb(score['ucb'])
+                        population[idx].set_ei(score['ei'])
+                        population[idx].set_pi(score['pi'])
                 elif model_type == 'ksvc':
                     for idx, score in zip([idx for idx, _ in ksvc_list], acquisition_scores):
-                        population[idx][self.SOLUTION_UCB] = score['ucb']
-                        population[idx][self.SOLUTION_EI] = score['ei']
-                        population[idx][self.SOLUTION_PI] = score['pi']
+                        population[idx].set_ucb(score['ucb'])
+                        population[idx].set_ei(score['ei'])
+                        population[idx].set_pi(score['pi'])
                 elif model_type == 'gb':
                     for idx, score in zip([idx for idx, _ in gb_list], acquisition_scores):
-                        population[idx][self.SOLUTION_UCB] = score['ucb']
-                        population[idx][self.SOLUTION_EI] = score['ei']
-                        population[idx][self.SOLUTION_PI] = score['pi']
+                        population[idx].set_ucb(score['ucb'])
+                        population[idx].set_ei(score['ei'])
+                        population[idx].set_pi(score['pi'])
                 elif model_type == 'knn':
                     for idx, score in zip([idx for idx, _ in knn_list], acquisition_scores):
-                        population[idx][self.SOLUTION_UCB] = score['ucb']
-                        population[idx][self.SOLUTION_EI] = score['ei']
-                        population[idx][self.SOLUTION_PI] = score['pi']
+                        population[idx].set_ucb(score['ucb'])
+                        population[idx].set_ei(score['ei'])
+                        population[idx].set_pi(score['pi'])
                 elif model_type == 'mlp':
                     for idx, score in zip([idx for idx, _ in mlp_list], acquisition_scores):
-                        population[idx][self.SOLUTION_UCB] = score['ucb']
-                        population[idx][self.SOLUTION_EI] = score['ei']
-                        population[idx][self.SOLUTION_PI] = score['pi']
+                        population[idx].set_ucb(score['ucb'])
+                        population[idx].set_ei(score['ei'])
+                        population[idx].set_pi(score['pi'])
                 else:
                     assert False, f"Unknown model type: {model_type} during acquisition score computation."
-
-        # quick sanity check to ensure all acquisition scores have been computed for the population
-        for individual in population:
-            assert individual[self.SOLUTION_UCB] is not None, "UCB score not computed for an individual in the population."
-            assert individual[self.SOLUTION_EI] is not None, "EI score not computed for an individual in the population."
-            assert individual[self.SOLUTION_PI] is not None, "PI score not computed for an individual in the population."
 
         return
 
@@ -690,13 +537,8 @@ class EA:
         # quick sanity checks
         assert len(rf_models) > 0 or len(ksvc_models) > 0 or len(gb_models) > 0 or len(knn_models) > 0 or len(mlp_models) > 0, "At least one model type must be provided for evaluation."
 
-        # make list of tuples with each train/validation split for each fold of the 5-fold cross-validation
-        cv_splits = [(self.X_train_f1_rf, self.y_train_f1_rf, self.X_val_f1_rf, self.y_val_f1_rf),
-                     (self.X_train_f2_rf, self.y_train_f2_rf, self.X_val_f2_rf, self.y_val_f2_rf),
-                     (self.X_train_f3_rf, self.y_train_f3_rf, self.X_val_f3_rf, self.y_val_f3_rf),
-                     (self.X_train_f4_rf, self.y_train_f4_rf, self.X_val_f4_rf, self.y_val_f4_rf),
-                     (self.X_train_f5_rf, self.y_train_f5_rf, self.X_val_f5_rf, self.y_val_f5_rf)
-                     ]
+        # get CV splits from base class
+        cv_splits = self.get_cv_splits()
 
         # load all rf models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
         ray_jobs = []
@@ -870,7 +712,7 @@ class EA:
 
         return rf_models, ksvc_models, gb_models, knn_models, mlp_models
 
-    def generate_acquisition_scores_for_nsga(self, population: list) -> npt.NDArray:
+    def generate_acquisition_scores_for_nsga(self, population: List[Individual]) -> npt.NDArray:
         """
         Generates a set of acquisition scores from the population formatted for the non_dominated_sorting function.
         The acquisition scores are extracted as tuples of floats representing the objective values for NSGA-II.
@@ -884,7 +726,7 @@ class EA:
         function handles this correctly as it only compares relative values for dominance relationships.
 
         Args:
-            population (list): The list of individuals for which to generate acquisition scores.
+            population (List[Individual]): The list of individuals for which to generate acquisition scores.
 
         Returns:
             npt.NDArray: A numpy array where each element is a tuple of floats representing the acquisition scores
@@ -898,12 +740,9 @@ class EA:
         acquisition_scores = []
         for individual in population:
             scores = []
-            assert individual[self.SOLUTION_UCB] is not None, "UCB score not found for an individual."
-            scores.append(float(individual[self.SOLUTION_UCB]))
-            assert individual[self.SOLUTION_EI] is not None, "EI score not found for an individual."
-            scores.append(float(individual[self.SOLUTION_EI]))
-            assert individual[self.SOLUTION_PI] is not None, "PI score not found for an individual."
-            scores.append(float(individual[self.SOLUTION_PI]))
+            scores.append(float(individual.get_ucb()))
+            scores.append(float(individual.get_ei()))
+            scores.append(float(individual.get_pi()))
 
             acquisition_scores.append(tuple(scores))
 
@@ -920,16 +759,16 @@ class EA:
 
         return result
 
-    def generate_offspring(self, parents: List[Dict]) -> List[Dict]:
+    def generate_offspring(self, parents: List[Individual]) -> List[Individual]:
         """
         Generates offspring from the given parents using mutation operations only.
         Crossover cannot be used because the hyperparameter spaces for each model type are not compatible with each other.
 
         Args:
-            parents (List[Dict]): A list of parent individuals from the population.
+            parents (List[Individual]): A list of parent individuals from the population.
 
         Returns:
-            List[Dict]: A list of offspring individuals generated from the parents.
+            List[Individual]: A list of offspring individuals generated from the parents.
         """
         # quick sanity checks
         assert len(parents) > 0, "Parents list is empty. Cannot generate offspring"
@@ -937,62 +776,13 @@ class EA:
         offspring = []
 
         for parent in parents:
-            # quick sanity check to ensure the parent has the required keys
-            assert self.SOLUTION_TYPE in parent, "Parent individual missing 'type' key."
-            assert self.SOLUTION_PARAMS in parent, "Parent individual missing 'params' key."
-
             # generate a mutated offspring from the parent
             child = self.mutate(parent)
-
-            # quick sanity check to ensure the child has the required keys
-            assert self.SOLUTION_TYPE in child, "Child individual missing 'type' key."
-            assert self.SOLUTION_PARAMS in child, "Child individual missing 'params' key."
-
             offspring.append(child)
 
         return offspring
 
-    def mutate(self, individual: Dict) -> Dict:
-        """
-        Mutates the given individual by randomly altering its hyperparameters based on the mutation probability.
-
-        Args:
-            individual (Dict): The individual to be mutated.
-
-        Returns:
-            Dict: A new individual with mutated hyperparameters.
-        """
-        # quick sanity checks
-        assert self.SOLUTION_TYPE in individual, "Individual missing 'type' key."
-        assert self.SOLUTION_PARAMS in individual, "Individual missing 'params' key."
-
-        model_type = individual[self.SOLUTION_TYPE]
-        params = individual[self.SOLUTION_PARAMS]
-
-        # mutate the hyperparameters based on the model type
-        if model_type == 'rf':
-            mutated_params = model_param_space.RandomForestParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-        elif model_type == 'ksvc':
-            mutated_params = model_param_space.KernelSVCParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-        elif model_type == 'gb':
-            mutated_params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-        elif model_type == 'knn':
-            mutated_params = model_param_space.KNeighborsClassifierParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-        elif model_type == 'mlp':
-            mutated_params = model_param_space.MLPClassifierParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-
-        # return a new individual with the same type but mutated parameters
-        return {self.SOLUTION_TYPE: cp.deepcopy(model_type),
-                self.SOLUTION_PARAMS: cp.deepcopy(mutated_params),
-                self.SOLUTION_UCB: None,
-                self.SOLUTION_EI: None,
-                self.SOLUTION_PI: None,
-                self.SOLUTION_VALIDATION_SCORE: None,
-                self.SOLUTION_TRAIN_SCORE: None}
-
-    def final_model_evaluation(self,) -> None:
+    def final_model_evaluation(self) -> None:
         """
         Evaluates the final model after the optimization process is complete.
         This function collects all model/hyperparameter combinations that tie for best validation performance,
@@ -1008,6 +798,7 @@ class EA:
 
         # determine the overall best validation score
         best_overall_score = max([best_rf, best_ksvc, best_gb, best_knn, best_mlp])
+        self.best_perf = best_overall_score
 
         # collect all model/hyperparameter combinations that achieve the best validation score
         best_candidates = []
@@ -1017,7 +808,7 @@ class EA:
             for idx, score in enumerate(self.rf_history[self.SOLUTION_VALIDATION_SCORE]):
                 if score == best_overall_score:
                     best_candidates.append({
-                        'model_type': 'rf',
+                        'model_type': 'RF',
                         'params': {
                             'n_estimators': self.rf_history['n_estimators'][idx],
                             'criterion': self.rf_history['criterion'][idx],
@@ -1033,7 +824,7 @@ class EA:
             for idx, score in enumerate(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE]):
                 if score == best_overall_score:
                     best_candidates.append({
-                        'model_type': 'ksvc',
+                        'model_type': 'KSVC',
                         'params': {
                             'C': self.ksvc_history['C'][idx],
                             'kernel': self.ksvc_history['kernel'][idx],
@@ -1048,7 +839,7 @@ class EA:
             for idx, score in enumerate(self.gb_history[self.SOLUTION_VALIDATION_SCORE]):
                 if score == best_overall_score:
                     best_candidates.append({
-                        'model_type': 'gb',
+                        'model_type': 'GB',
                         'params': {
                             'loss': self.gb_history['loss'][idx],
                             'learning_rate': self.gb_history['learning_rate'][idx],
@@ -1065,7 +856,7 @@ class EA:
             for idx, score in enumerate(self.knn_history[self.SOLUTION_VALIDATION_SCORE]):
                 if score == best_overall_score:
                     best_candidates.append({
-                        'model_type': 'knn',
+                        'model_type': 'KNN',
                         'params': {
                             'n_neighbors': self.knn_history['n_neighbors'][idx],
                             'weights': self.knn_history['weights'][idx],
@@ -1080,7 +871,7 @@ class EA:
             for idx, score in enumerate(self.mlp_history[self.SOLUTION_VALIDATION_SCORE]):
                 if score == best_overall_score:
                     best_candidates.append({
-                        'model_type': 'mlp',
+                        'model_type': 'MLP',
                         'params': {
                             'layer_1': self.mlp_history['layer_1'][idx],
                             'layer_2': self.mlp_history['layer_2'][idx],
@@ -1100,66 +891,55 @@ class EA:
         print(f"Selected final model: {selected_candidate['model_type']} with validation score: {best_overall_score}")
         print(f"Total candidates with best performance: {len(best_candidates)}")
 
-
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), self.numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), self.categorical_cols)
-            ],
-            remainder='passthrough'
+        # evaluate best individual on test set using BaseEA method
+        train_score, test_score = self.model_test_evaluation(
+            model_type=selected_candidate['model_type'],
+            model_params=selected_candidate['params']
         )
-
-        X_train_preprocessed = preprocessor.fit_transform(self.X_train)
-        X_test_preprocessed = preprocessor.transform(self.X_test)
-
-        # fit the selected model on the entire training set and evaluate on test set
-        model_type = selected_candidate['model_type']
-        params = selected_candidate['params']
-
-        if model_type == 'rf':
-            eval_params = RandomForestParams().eval_parameters(params)
-            model = RandomForestClassifier(**eval_params, random_state=self.seed)
-        elif model_type == 'ksvc':
-            eval_params = KernelSVCParams().eval_parameters(params)
-            model = SVC(**eval_params, random_state=self.seed, probability=True)
-        elif model_type == 'gb':
-            eval_params = GradientBoostParams(binary_class=self.binary_classification).eval_parameters(params)
-            model = GradientBoostingClassifier(**eval_params, random_state=self.seed)
-        elif model_type == 'knn':
-            eval_params = KNeighborsClassifierParams().eval_parameters(params)
-            model = KNeighborsClassifier(**eval_params)
-        elif model_type == 'mlp':
-            eval_params = MLPClassifierParams().eval_parameters(params)
-            model = MLPClassifier(**eval_params, random_state=self.seed)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-
-        # fit the model on the entire training set
-        model.fit(X_train_preprocessed, self.y_train)
-
-        # evaluate on train and test sets (matching the evaluation method in ray_utils.py)
-        train_pred_proba = model.predict_proba(X_train_preprocessed)
-        test_pred_proba = model.predict_proba(X_test_preprocessed)
-
-        if self.binary_classification:
-            train_score = float(roc_auc_score(self.y_train, train_pred_proba[:, 1]))
-            test_score = float(roc_auc_score(self.y_test, test_pred_proba[:, 1]))
-        else:
-            train_score = -float(log_loss(self.y_train, train_pred_proba, labels=self.labels))
-            test_score = -float(log_loss(self.y_test, test_pred_proba, labels=self.labels))
 
         print(f"Final model train score: {train_score}")
         print(f"Final model test score: {test_score}")
 
-        # store the final model and results
-        self.final_model = model
-        self.final_model_type = model_type
-        self.final_model_params = params
-        self.final_model_train_score = train_score
-        self.final_model_test_score = test_score
-        self.final_model_validation_score = best_overall_score
+        # store the best individual with all performance metrics
+        best_individual = Individual(selected_candidate['params'], selected_candidate['model_type'].lower())
+        best_individual.set_val_performance(best_overall_score)
+        best_individual.set_train_performance(train_score)
+        best_individual.set_test_performance(test_score)
+        self.best_ind = best_individual
 
         return
 
-    def save_results(self) -> None:
+    def save_results(self, save_dir: str) -> None:
+        """
+        Save final results using the best individual evaluated at the end of evolve().
+        The JSON will contain train, validation, and test accuracy as well as the hyperparameter settings.
+        """
+        import os
+        import json
+
+        assert self.best_ind is not None, "No best individual found. Run evolve() first."
+
+        print(f"Best individual params: {self.best_ind.get_params()}", flush=True)
+        print(f"Best validation performance: {self.best_perf}", flush=True)
+
+        # Create output directory structure if it doesn't exist
+        task_output_dir = os.path.join(save_dir)
+        os.makedirs(task_output_dir, exist_ok=True)
+
+        # Save best individual results as JSON
+        best_results = {
+            "task_id": self.task_id,
+            "model_type": self.best_ind.model_type,
+            "seed": self.seed,
+            "train_accuracy": self.best_ind.get_train_performance(),
+            "validation_accuracy": float(self.best_perf),
+            "test_accuracy": self.best_ind.get_test_performance(),
+            "best_params": self.best_ind.get_params(),
+        }
+
+        json_path = os.path.join(task_output_dir, "best_results.json")
+        with open(json_path, 'w') as f:
+            json.dump(best_results, f, indent=4)
+        print(f"Best results saved to: {json_path}", flush=True)
+
         return

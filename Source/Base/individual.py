@@ -17,10 +17,18 @@ class Individual:
             cv_train_score (float): Final accuracy on the training set.
         """
 
-        # Initialize performance-related attributes to None initially (add asserts later to ensure they are only set once)
+        # train_performance
         self.train_performance = None
+        # validation performance
         self.val_performance = None
+        # test performance
+        self.test_performance = None
+        # expected improvement
         self.ei = None
+        # upper confidence bound
+        self.ucb = None
+        # probability of improvement
+        self.pi = None
 
         # Initialize params, a set of random hyperparameters ({parameter_name: value})
         self.params: Dict[str, Any] = params
@@ -46,9 +54,33 @@ class Individual:
         assert self.val_performance is not None, "Validation performance has not been set yet."
         return self.val_performance
 
+    def set_test_performance(self, f: float) -> None:
+        assert self.test_performance is None, "Test performance has already been set."
+        self.test_performance = f
+
+    def get_test_performance(self) -> float:
+        assert self.test_performance is not None, "Test performance has not been set yet."
+        return self.test_performance
+
     def set_ei(self, ei: float) -> None:
         assert self.ei is None, "Expected Improvement has already been set."
         self.ei = ei
+
+    def set_ucb(self, ucb: float) -> None:
+        assert self.ucb is None, "Upper Confidence Bound has already been set."
+        self.ucb = ucb
+
+    def get_ucb(self) -> float:
+        assert self.ucb is not None, "Upper Confidence Bound has not been set yet."
+        return self.ucb
+
+    def set_pi(self, pi: float) -> None:
+        assert self.pi is None, "Probability of Improvement has already been set."
+        self.pi = pi
+
+    def get_pi(self) -> float:
+        assert self.pi is not None, "Probability of Improvement has not been set yet."
+        return self.pi
 
     def get_ei(self) -> float:
         assert self.ei is not None, "Expected Improvement has not been set yet."

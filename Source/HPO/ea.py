@@ -1,139 +1,122 @@
+##########################################################################################
+#
+# HPO (Hyperparameter Optimization) EA for single-model optimization.
+# Inherits from BaseEA and provides TPE-guided mutation for a single model type.
+#
+##########################################################################################
+
 import numpy as np
 import ray
-from Source.Base.individual import Individual
-from typeguard import typechecked
-from typing import List, Dict, Optional
 import copy as cp
-from Source.Base.tpe import TPE
-from Source.Base.data_utils import load_data, get_ray_cv_splits, preprocess_train_test
-from Source.Base.ea_utils import parent_selection
 import os
 import time
-import pandas as pd
 import json
+import pandas as pd
+
+from typeguard import typechecked
+from typing import List, Optional
+
+from Source.Base.base_ea import BaseEA
+from Source.Base.individual import Individual
+from Source.Base.tpe import TPE
+
+from Source.Base.model_param_space import (
+    RandomForestParams, KernelSVCParams, GradientBoostParams,
+    KNeighborsClassifierParams, MLPClassifierParams
+)
+from Source.Base.ray_utils import (
+    cv_random_forest, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp
+)
+
 
 @typechecked
-class EA:
+class EA(BaseEA):
     """
-    EA Solver for hyperparameter optimization only.
+    HPO (Hyperparameter Optimization) EA for single-model optimization.
+    Extends BaseEA with TPE-guided mutation for optimizing hyperparameters of a single model type.
     """
+
     def __init__(self,
-                 model_config: Dict,
-                 tpe_prob: float,
                  seed: int,
-                 gens: int,
                  pop_size: int,
+                 cores: int,
+                 mut_prob: float,
+                 mut_var: float,
+                 model: str,  # must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP']
+                 tpe_prob: float,
                  tournament_size: int,
-                 mutation_rate: float,
-                 mutation_var: float,
                  num_offspring: int,
-                 task_id: int,
-                 rep: int,
-                 data_dir: str,
-                 split_dir: str,
-                 output_dir: str,
-                 window: int,
-                 gamma: float = 0.0,) -> None:
+                 gamma: float = 0.0) -> None:
         """
-        Parameters:
-            param_space (ModelParams): Model parameter space object that
-        """
+        Initializes the HPO EA class with the provided parameters.
 
-        # extract model parameter space and functions from model_config
-
-        self.param_space = model_config['param_class'] # model parameter space
-        self.test_eval_func = model_config['test_eval_func'] # model test evaluation function
-        self.ray_train_func = model_config['ray_train_func'] # ray remote training function (deprecated)
-        self.ray_train_func_cv = model_config['ray_train_func_cv'] # ray remote training function for consolidated CV
-
-        # ea parameters
-
-        self.gens = gens # number of generations
-        self.pop_size = pop_size # population size
-        self.tournament_size = tournament_size # tournament size for parent selection
-        self.mutation_rate = mutation_rate # mutation rate
-        self.mutation_var = mutation_var # mutation variance
-        self.num_offspring = num_offspring # number of offspring per parent for tpe
-        self.seed = seed # random seed
-        self.rng = np.random.default_rng(seed) # random number generator
-        self.population: List[Individual] = [] # current population
-
-        # history data for analysis
-
-        self.archive: List[Individual] = [] # archive of evaluated individuals
-        self.tpe_archive: List[Individual] = [] # archive for tpe individuals
-        self.hard_eval_count = 0 # evaluations on the true objective
-        self.tpe = TPE(gamma=gamma) # tpe object for tpe-based mutation, can be None
-        self.best_perf = float("-inf") # best performance seen so far
-        self.best_ind: Optional[Individual] = None # GLOBAL best, regardless of sliding window size
-        self.tpe_prob = tpe_prob # probability of using tpe-based selection
-        self.window = window # sliding window size for archive
-
-        # openml dataset loading
-
-        self.task_id = task_id # openml task id
-        self.rep = rep # replicate number
-        self.data_directory = data_dir # directory where datasets are stored
-        self.split_directory = split_dir # directory where splits are stored
-        self.output_directory = output_dir # directory for output files that are generated
-
-        return
-
-    def load_openml_dataset(self) -> None:
-        """
-        Load dataset from OpenML given task ID and replicate number.
-        Will use the load_data, get_ray_cv_splits, preprocess_train_test functions.
-        Located in ..Source/Base/data_utils.py
-
-        Parameters:
-            task_id (int): OpenML task ID.
-            rep (int): Replicate number.
-            data_directory (str): Directory where datasets are stored.
-            split_directory (str): Directory where splits are stored.
-        """
-
-        # indicies for train/test split for a given task and replicate
-        rep_dir = os.path.join(self.split_directory, f"task_{self.task_id}", f"Replicate_{self.rep}")
-        # load all train/test data
-        self.X_train, self.X_test, self.y_train, self.y_test = load_data(self.task_id, self.data_directory, rep_dir)
-        # get all 5-fold cv splits as list of (train_idx, val_idx)
-        print(f"Preparing cross-validation splits...", flush=True)
-        self.X_train_f0, self.X_val_f0, self.y_train_f0, self.y_val_f0, \
-        self.X_train_f1, self.X_val_f1, self.y_train_f1, self.y_val_f1, \
-        self.X_train_f2, self.X_val_f2, self.y_train_f2, self.y_val_f2, \
-        self.X_train_f3, self.X_val_f3, self.y_train_f3, self.y_val_f3, \
-        self.X_train_f4, self.X_val_f4, self.y_train_f4, self.y_val_f4 = get_ray_cv_splits(rep_dir=rep_dir,
-                                                                                           X_train=self.X_train,
-                                                                                           y_train=self.y_train,
-                                                                                           task_id=self.task_id,
-                                                                                           data_dir=self.data_directory)
-
-        # Put CV data into Ray's object store (optimization to avoid repeated serialization)
-        print(f"Storing CV data in Ray object store...", flush=True)
-        cv_data_tuple = (
-            self.X_train_f0, self.y_train_f0, self.X_val_f0, self.y_val_f0,
-            self.X_train_f1, self.y_train_f1, self.X_val_f1, self.y_val_f1,
-            self.X_train_f2, self.y_train_f2, self.X_val_f2, self.y_val_f2,
-            self.X_train_f3, self.y_train_f3, self.X_val_f3, self.y_val_f3,
-            self.X_train_f4, self.y_train_f4, self.X_val_f4, self.y_val_f4
-        )
-        self.cv_data_ref = ray.put(cv_data_tuple)
-        return
-
-    def evolve(self) -> None:
-        """
-        Run the default EA with parallelized fitness evaluations using Ray.
-
-        Parameters:
+        Args:
+            model (str): The type of model to optimize. Must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP'].
+            tpe_prob (float): Probability of using TPE-based selection.
+            seed (int): Random seed for reproducibility.
             gens (int): Number of generations to evolve.
-            pop_size (int): Population size.
+            pop_size (int): Population size for the evolutionary algorithm.
+            cores (int): Number of CPU cores to use for parallel processing.
+            tournament_size (int): Tournament size for parent selection.
+            mut_prob (float): Probability of mutating each hyperparameter.
+            mut_var (float): Variance for Gaussian mutation.
+            num_offspring (int): Number of pseudo-offspring to generate for TPE.
+            output_dir (str): Directory for output files.
+            gamma (float): Gamma parameter for TPE.
+        """
+        # initialize the base class
+        super().__init__(
+            seed=seed,
+            pop_size=pop_size,
+            cores=cores,
+            mut_prob=mut_prob,
+            mut_var=mut_var,
+        )
+
+        # map model string to parameter space class and ray training function
+        model_configs = {
+            'RF': (RandomForestParams(), cv_random_forest),
+            'KSVC': (KernelSVCParams(), cv_kernel_svc),
+            'GB': (GradientBoostParams(binary_class=True), cv_gradient_boost),
+            'KNN': (KNeighborsClassifierParams(), cv_knn),
+            'MLP': (MLPClassifierParams(), cv_mlp),
+        }
+        if model not in model_configs:
+            raise ValueError(f"Unknown model type: {model}. Must be one of {list(model_configs.keys())}")
+        self.param_space, self.ray_train_func = model_configs[model]
+
+        # HPO-specific EA parameters
+        self.tournament_size = tournament_size
+        self.num_offspring = num_offspring
+
+        # TPE-related parameters
+        self.tpe_prob = tpe_prob
+        self.tpe = TPE(gamma=gamma)
+
+        # archive tracking
+        self.archive: List[Individual] = []
+        self.tpe_archive: List[Individual] = []
+        self.hard_eval_count = 0
+        self.best_perf = float("-inf")
+        self.best_ind: Optional[Individual] = None
+
+        return
+
+    def evolve(self, gens: int, ucb: bool = False, pi: bool = False, ei: bool = False) -> None:
+        """
+        Run the EA with parallelized fitness evaluations using Ray.
+
+        Args:
+            gens (int): Number of generations to evolve.
+            ucb (bool): Not used in HPO EA (included for interface compatibility).
+            pi (bool): Not used in HPO EA (included for interface compatibility).
+            ei (bool): Not used in HPO EA (included for interface compatibility).
         """
 
         start_time = time.time()
 
         # Initialize population with random individuals
-        self.population = [Individual(self.param_space.generate_random_parameters(self.rng),self.param_space.get_model_type()) \
-            for _ in range(self.pop_size)]
+        self.initialize_population()
 
         # Evaluate initial population with Ray
         self.population = self.evaluation(self.population)
@@ -142,7 +125,7 @@ class EA:
         self.hard_eval_count += len(self.population)
 
         # update archive
-        self.update_archive(self.population, self.window)
+        self.update_archive(self.population)
 
         # keep track of best
         self.update_best_seen(self.population)
@@ -150,95 +133,263 @@ class EA:
         print(f"Best performance so far (Gen 0): {self.best_perf}", flush=True)
 
         # Start evolution
-        for g in range(self.gens):
+        for g in range(gens):
             # Parent selection with tournament selection
-            parent_ids = parent_selection(self.population, self.pop_size, self.rng, self.tournament_size)
+            parent_ids = self.parent_selection(self.population, self.pop_size, self.rng)
 
             # Generate offspring through mutation
-            offspring = self.generate_offspring(self.population,
-                                                parent_ids,
-                                                self.mutation_rate,
-                                                self.mutation_var,
-                                                self.num_offspring)
+            offspring = self.generate_offspring(self.population, parent_ids)
 
             # Evaluate offspring with Ray and update population
             self.population = self.evaluation(offspring)
             self.hard_eval_count += len(offspring)
 
             # update archive
-            self.update_archive(offspring, self.window)
-
-            # Get best performance in current population
-            # current_best = max([ind.get_val_performance() for ind in self.population])
-            # if current_best > self.best_perf:
-            #     self.best_perf = current_best
+            self.update_archive(offspring)
 
             # keep track of best
             self.update_best_seen(self.population)
             print(f"Best performance so far (Gen {g+1}): {self.best_perf}", flush=True)
 
         # make sure that the archive is the correct size
-        assert len(self.archive) <= self.window
-        # assert len(self.archive) == self.gens * self.pop_size + self.pop_size
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
         print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
-        return
 
-    def save_results(self) -> None:
-        """
-        Save final results by evaluating the best individual on the test set in a JSON format.
-        The JSON will contain train and test accuracy as well as the hyperparameter settings.
-
-        Save the entire archive to output directory as well as a csv file with headers reflecting the model parameters type.
-        """
-
-        # Iterate through archive to get all set of best performers
-        # best_performers = [pos for pos, ind in enumerate(self.archive) if ind.get_val_performance() == self.best_perf]
-
-        # Get rid of exact float equality
+        # find all best performers in the archive, and randomly select one for final test evaluation
         tol = 1e-12
         best_performers = [
             pos for pos, ind in enumerate(self.archive)
             if abs(ind.get_val_performance() - self.best_perf) <= tol
         ]
-        print(f"Number of best performers in archive: {len(best_performers)}", flush=True)
 
         if len(best_performers) > 0:
-            # randomly select one of the best performers for final test evaluation
             best_individual = cp.deepcopy(self.archive[self.rng.choice(best_performers)])
         else:
             assert self.best_ind is not None, "No stored global best individual."
             best_individual = cp.deepcopy(self.best_ind)
 
-        # fit best individual on full training data and evaluate on test set
-        X_train_transformed, y_train, X_test_transformed, y_test = preprocess_train_test(self.X_train,
-                                                                                         self.y_train,
-                                                                                         self.X_test,
-                                                                                         self.y_test,
-                                                                                         self.task_id,
-                                                                                         self.data_directory)
-        # train final model with evaluation map
-        train, test, error = self.test_eval_func(X_train_transformed, y_train, X_test_transformed,
-                            y_test, best_individual.get_params(),self.seed)
-        assert error > 0.0, "Error during final model train/test evaluation."
+        # evaluate best individual on test set
+        train_score, test_score = self.model_test_evaluation(
+            model_type=self.param_space.get_model_type().upper(),
+            model_params=best_individual.get_params()
+        )
+        best_individual.set_train_performance(train_score)
+        best_individual.set_test_performance(test_score)
+        self.best_ind = best_individual
 
-        print(f"Final evaluation on test set:", flush=True)
-        print(f"Train Accuracy: {train}", flush=True)
-        print(f"Test Accuracy: {test}", flush=True)
+        print(f"Final test evaluation - Train: {train_score}, Test: {test_score}", flush=True)
+
+        return
+
+    def initialize_population(self) -> None:
+        """
+        Initializes the starting population for the HPO EA.
+        Creates random individuals using the single model's parameter space.
+        """
+        assert len(self.population) == 0, "Population has already been initialized."
+
+        self.population = [
+            Individual(
+                self.param_space.generate_random_parameters(self.rng),
+                self.param_space.get_model_type()
+            )
+            for _ in range(self.pop_size)
+        ]
+        return
+
+    def parent_selection(self, population: List[Individual], num_parents: int, rng: np.random.Generator) -> List[int]:
+        """
+        Select parents from the population using tournament selection.
+
+        Parameters:
+            population (List[Individual]): The population of individuals.
+            num_parents (int): The number of parents to select.
+            rng (np.random.Generator): Random number generator for reproducibility.
+
+        Returns:
+            List[int]: Indices of the selected parent individuals.
+        """
+        assert len(population) > 0, "Population must not be empty."
+
+        parent_ids = []
+        for _ in range(num_parents):
+            indices = rng.choice(len(population), self.tournament_size, replace=False)
+            extracted_performances = np.array([population[i].get_val_performance() for i in indices])
+            best_tour_idx = np.argmax(extracted_performances)
+            winner = int(rng.choice([i for i, perf in zip(indices, extracted_performances) if perf == extracted_performances[best_tour_idx]]))
+            parent_ids.append(winner)
+
+        return parent_ids
+
+    def evaluation(self, candidates: List[Individual]) -> List[Individual]:
+        """
+        Evaluate a collection of individuals using Ray across 5-fold cross-validation.
+        This method will update each individual's train and validation performance.
+        Uses the same CV split data structure as CASH EA via get_cv_splits() from BaseEA.
+
+        Args:
+            candidates (List[Individual]): List of individuals to evaluate.
+
+        Returns:
+            List[Individual]: The evaluated individuals with updated performance metrics.
+        """
+        # get CV splits from base class
+        cv_splits = self.get_cv_splits()
+
+        ray_jobs = []
+        # Create Ray tasks for each individual across all 5 folds
+        for model_id, ind in enumerate(candidates):
+            for X_train, y_train, X_validate, y_validate in cv_splits:
+                ray_jobs.append(self.ray_train_func.remote(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_validate=X_validate,
+                    y_validate=y_validate,
+                    model_params=self.param_space.eval_parameters(ind.get_params()),
+                    random_state=self.seed,
+                    id=model_id,
+                    binary_class=self.binary_classification,
+                    labels=self.labels
+                ))
+
+        # Initialize results storage
+        pop_results = {i: {'train_acc': [], 'val_acc': []} for i in range(len(candidates))}
+
+        # Gather results as they complete
+        while len(ray_jobs) > 0:
+            finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
+            for done_id in finished:
+                model_id, train_acc, val_acc, error = ray.get(done_id)
+                assert error > 0.0, f"Error during model training/evaluation for model_id {model_id}."
+                pop_results[model_id]['train_acc'].append(train_acc)
+                pop_results[model_id]['val_acc'].append(val_acc)
+
+        # Assign performances to individuals
+        for i, ind in enumerate(candidates):
+            ind.set_train_performance(float(np.mean(pop_results[i]['train_acc'])))
+            ind.set_val_performance(float(np.mean(pop_results[i]['val_acc'])))
+
+        return candidates
+
+    def generate_offspring(self, candidates: List[Individual], parent_ids: List[int]) -> List[Individual]:
+        """
+        Generate offspring through mutation from selected parents.
+
+        Args:
+            candidates (List[Individual]): Candidate set of individuals.
+            parent_ids (List[int]): List of indices of selected parents.
+            mutation_rate (float): Probability of mutating each hyperparameter.
+            mutation_var (float): Variance for Gaussian mutation.
+            num_offspring (int): Number of pseudo-offspring to generate for TPE.
+
+        Returns:
+            List[Individual]: List of offspring individuals.
+        """
+        assert len(parent_ids) == len(candidates), "Number of parent IDs must match number of candidates."
+        assert len(parent_ids) > 0, "At least one parent must be selected."
+        assert len(self.tpe_archive) > 0, "TPE archive must have at least one individual for TPE-based mutation"
+        assert len(self.tpe_archive) == len(self.archive), "TPE archive size must match main archive size."
+
+        # store offspring here
+        offspring = []
+
+        # fit tpe model if self.tpe_prob > 0
+        if self.tpe_prob > 0.0:
+            self.tpe.fit(self.tpe_archive, self.param_space, self.rng)
+
+        # go through each parent and generate offspring, roll for tpe or random mutation
+        for pid in parent_ids:
+            # tpe-based mutation
+            if self.rng.random() < self.tpe_prob:
+                candidate_offspring = []
+                for _ in range(self.num_offspring):
+                    # mutate parent_params
+                    candidate_offspring.append(self.param_space.mutate_parameters(
+                        candidates[pid].get_params(),
+                        self.mut_var,
+                        self.mut_prob,
+                        self.rng
+                    ))
+                # get best offspring according to tpe
+                candidate_index = self.tpe.suggest_one(
+                    self.param_space,
+                    [self.param_space.tpe_parameters(params) for params in candidate_offspring],
+                    self.rng
+                )
+
+                # append offspring recommended by tpe
+                offspring.append(Individual(candidate_offspring[candidate_index], self.param_space.get_model_type()))
+
+            # random mutation
+            else:
+                child_params = self.param_space.mutate_parameters(
+                    candidates[pid].get_params(),
+                    self.mut_var,
+                    self.mut_prob,
+                    self.rng
+                )
+                offspring.append(Individual(child_params, self.param_space.get_model_type()))
+
+        assert len(offspring) == len(parent_ids), "Number of offspring must match number of parents."
+        return offspring
+
+    def update_archive(self, evaluated_individuals: List[Individual]) -> None:
+        """
+        Update the archive with newly evaluated individuals.
+        This archive is used to find the best performing individuals for final test set evaluation.
+        Can also be used for TPE fitting.
+
+        Args:
+            evaluated_individuals (List[Individual]): List of newly evaluated individuals.
+        """
+        for ind in evaluated_individuals:
+            arch_ind = Individual(ind.get_params(), ind.model_type)
+            arch_ind.set_val_performance(ind.get_val_performance())
+            self.archive.append(arch_ind)
+
+            tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
+            tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
+            self.tpe_archive.append(tpe_ind)
+
+        return
+
+    def update_best_seen(self, individuals: List[Individual]) -> None:
+        """
+        Update the best seen individual across all generations.
+
+        Args:
+            individuals (List[Individual]): List of individuals to check.
+        """
+        for ind in individuals:
+            perf = ind.get_val_performance()
+            if perf > self.best_perf:
+                self.best_perf = perf
+                self.best_ind = cp.deepcopy(ind)
+
+    def save_results(self, save_dir: str) -> None:
+        """
+        Save final results using the best individual evaluated at the end of evolve().
+        The JSON will contain train, validation, and test accuracy as well as the hyperparameter settings.
+        Save the entire archive to output directory as well as a csv file with headers reflecting the model parameters type.
+        """
+        assert self.best_ind is not None, "No best individual found. Run evolve() first."
+
+        print(f"Best individual params: {self.best_ind.get_params()}", flush=True)
+        print(f"Best validation performance: {self.best_perf}", flush=True)
 
         # Create output directory structure if it doesn't exist
-        task_output_dir = os.path.join(self.output_directory)
+        task_output_dir = os.path.join(save_dir)
         os.makedirs(task_output_dir, exist_ok=True)
 
         # Save best individual results as JSON
         best_results = {
             "task_id": self.task_id,
-            "replicate": self.rep,
             "model_type": self.param_space.get_model_type(),
             "seed": self.seed,
-            "train_accuracy": float(train),
-            "test_accuracy": float(test),
+            "train_accuracy": self.best_ind.get_train_performance(),
             "validation_accuracy": float(self.best_perf),
+            "test_accuracy": self.best_ind.get_test_performance(),
+            "best_params": self.best_ind.get_params(),
         }
 
         json_path = os.path.join(task_output_dir, "best_results.json")
@@ -260,140 +411,3 @@ class EA:
         print(f"Archive saved to: {csv_path}", flush=True)
 
         return
-
-    def evaluation(self, candidates: List[Individual]) -> List[Individual]:
-        """
-        Evaluate a collection of individuals using Ray across 5-fold cross-validation.
-        This method will update each individual's train and validation performance.
-        Can be used for offspring evaluation during evolution or initial population evaluation.
-
-        Optimized version: Uses consolidated CV functions that process all 5 folds per
-        individual in a single Ray task, and leverages Ray's object store for CV data.
-
-        Parameters:
-            candidates (List[Individual]): List of individuals to evaluate.
-
-        Returns:
-            List[Individual]: The evaluated individuals with updated performance metrics.
-        """
-
-        ray_jobs = []
-        # Create one Ray task per individual (instead of 5 per individual)
-        for i, ind in enumerate(candidates):
-            ray_jobs.append(self.ray_train_func_cv.remote(self.cv_data_ref,
-                                                          ind.get_params(),
-                                                          self.seed,
-                                                          i))
-
-        # Gather results as they complete
-        pop_results = {}
-        while len(ray_jobs) > 0:
-            finished, ray_jobs = ray.wait(ray_jobs)
-            id, train_accs, val_accs, err = ray.get(finished[0])
-            assert err > 0.0, "Error during model training/evaluation."
-            assert len(train_accs) == 5, f"Expected 5 train accuracies, got {len(train_accs)}"
-            assert len(val_accs) == 5, f"Expected 5 val accuracies, got {len(val_accs)}"
-            pop_results[id] = {'train_acc': train_accs, 'val_acc': val_accs}
-
-        # Assign performances to individuals
-        for i, ind in enumerate(candidates):
-            ind.set_train_performance(np.mean(pop_results[i]['train_acc']))
-            ind.set_val_performance(np.mean(pop_results[i]['val_acc']))
-
-        return candidates
-
-    def generate_offspring(self,
-                           candidates: List[Individual],
-                           parent_ids: List[int],
-                           mutation_rate: float,
-                           mutation_var: float,
-                           num_offspring: int) -> List[Individual]:
-        """
-        Generate offspring through mutation from selected parents.
-
-        Parameters:
-            candidates (List[Individual]): Candidate set of individuals.
-            parent_ids (List[int]): List of indices of selected parents.
-            mutation_rate (float): Probability of mutating each hyperparameter.
-            mutation_var (float): Variance for Gaussian mutation.
-            num_offspring (int): Number of pseudo-offspring to generate for tpe.
-
-        Returns:
-            List[Individual]: List of offspring individuals.
-        """
-        assert len(parent_ids) == len(candidates), "Number of parent IDs must match number of candidates."
-        assert len(parent_ids) > 0, "At least one parent must be selected."
-        assert len(self.tpe_archive) > 0, "TPE archive must have at least one individual for TPE-based mutation"
-        assert len(self.tpe_archive) == len(self.archive), "TPE archive size must match main archive size."
-
-        # store offspring here
-        offspring = []
-
-        # fit tpe model if self.tpe_prob > 0
-        if self.tpe_prob > 0.0:
-            self.tpe.fit(self.tpe_archive, self.param_space, self.rng)
-
-        # go through each parent and generate offspring, roll for tpe or random mutation
-        for pid in parent_ids:
-
-            # tpe-based mutation
-            if self.rng.random() < self.tpe_prob:
-                candidate_offspring = []
-                for _ in range(num_offspring):
-                    # mutate parent_params
-                    candidate_offspring.append(self.param_space.mutate_parameters(candidates[pid].get_params(),
-                                                                        mutation_var,
-                                                                        mutation_rate,
-                                                                        self.rng))
-                # get best offspring according to tpe
-                candidate_index = self.tpe.suggest_one(self.param_space,
-                                                    [self.param_space.tpe_parameters(params) for params in candidate_offspring],
-                                                    self.rng)
-
-                # append offspring recommended by tpe
-                offspring.append(Individual(candidate_offspring[candidate_index], self.param_space.get_model_type()))
-
-            # random mutation
-            else:
-                child_params = self.param_space.mutate_parameters(candidates[pid].get_params(),
-                                                                  mutation_var,
-                                                                  mutation_rate,
-                                                                  self.rng)
-                offspring.append(Individual(child_params, self.param_space.get_model_type()))
-
-        assert len(offspring) == len(parent_ids), "Number of offspring must match number of parents."
-        return offspring
-
-    def update_archive(self, evaluated_individuals: List[Individual], window: int) -> None:
-        """
-        Update the archive with newly evaluated individuals.
-        This archive is used to find the best performing individuals for final test set evaluation.
-        Can also be used for TPE fitting.
-
-        Parameters:
-            evaluated_individuals (List[Individual]): List of newly evaluated individuals.
-        """
-
-        for ind in evaluated_individuals:
-            arch_ind = Individual(ind.get_params(), ind.model_type)
-            arch_ind.set_val_performance(ind.get_val_performance())  # TPE minimizes, so invert performance
-            self.archive.append(arch_ind)
-
-            tpe_ind = Individual(self.param_space.tpe_parameters(ind.get_params()), ind.model_type)
-            tpe_ind.set_val_performance(ind.get_val_performance() * -1.0)  # TPE minimizes, so invert performance
-            self.tpe_archive.append(tpe_ind)
-
-        # sliding window: keep only the most recent `window` individuals
-        if len(self.archive) > window:
-            self.archive = self.archive[-window:]
-
-        if len(self.tpe_archive) > window:
-            self.tpe_archive = self.tpe_archive[-window:]
-        return
-    
-    def update_best_seen(self, individuals: List[Individual]) -> None:
-        for ind in individuals:
-            perf = ind.get_val_performance()
-            if perf > self.best_perf:
-                self.best_perf = perf
-                self.best_ind = cp.deepcopy(ind)
