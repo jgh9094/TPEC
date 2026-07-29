@@ -75,17 +75,13 @@ class EA(BaseEA):
             mut_var=mut_var,
         )
 
-        # map model string to parameter space class and ray training function
-        model_configs = {
-            'RF': (RandomForestParams(), cv_random_forest),
-            'KSVC': (KernelSVCParams(), cv_kernel_svc),
-            'GB': (GradientBoostParams(binary_class=True), cv_gradient_boost),
-            'KNN': (KNeighborsClassifierParams(), cv_knn),
-            'MLP': (MLPClassifierParams(), cv_mlp),
-        }
-        if model not in model_configs:
-            raise ValueError(f"Unknown model type: {model}. Must be one of {list(model_configs.keys())}")
-        self.param_space, self.ray_train_func = model_configs[model]
+        # store model type for deferred param_space creation (after load_data sets binary_classification)
+        valid_models = ['RF', 'KSVC', 'GB', 'KNN', 'MLP']
+        if model not in valid_models:
+            raise ValueError(f"Unknown model type: {model}. Must be one of {valid_models}")
+        self.model = model
+        self.param_space = None
+        self.ray_train_func = None
 
         # HPO-specific EA parameters
         self.tournament_size = tournament_size
@@ -105,6 +101,22 @@ class EA(BaseEA):
         self.best_ind: Optional[Individual] = None
 
         return
+
+    def load_data(self, task_id: int, data_dir: str, train_p: float) -> None:
+        """
+        Loads data via parent class, then initializes param_space with correct binary_classification.
+        """
+        super().load_data(task_id, data_dir, train_p)
+
+        # now binary_classification is set, create the param_space
+        model_configs = {
+            'RF': (RandomForestParams(), cv_random_forest),
+            'KSVC': (KernelSVCParams(), cv_kernel_svc),
+            'GB': (GradientBoostParams(binary_class=self.binary_classification), cv_gradient_boost),
+            'KNN': (KNeighborsClassifierParams(), cv_knn),
+            'MLP': (MLPClassifierParams(), cv_mlp),
+        }
+        self.param_space, self.ray_train_func = model_configs[self.model]
 
     def evolve(self, gens: int, ucb: bool = False, pi: bool = False, ei: bool = False) -> None:
         """
