@@ -46,7 +46,9 @@ class EA(BaseEA):
                  tpe_prob: float,
                  tournament_size: int,
                  num_offspring: int,
-                 gamma: float = 0.0) -> None:
+                 gamma: float = 0.0,
+                 tpe_mut_scale: float = 0.5,
+                 explore_mut_scale: float = 2.0) -> None:
         """
         Initializes the HPO EA class with the provided parameters.
 
@@ -92,6 +94,8 @@ class EA(BaseEA):
         # TPE-related parameters
         self.tpe_prob = tpe_prob
         self.tpe = TPE(gamma=gamma)
+        self.tpe_mut_var = self.mut_var * tpe_mut_scale
+        self.explore_mut_var = self.mut_var * explore_mut_scale
 
         # archive tracking
         self.archive: List[Individual] = []
@@ -299,14 +303,14 @@ class EA(BaseEA):
 
         # go through each parent and generate offspring, roll for tpe or random mutation
         for pid in parent_ids:
-            # tpe-based mutation
+            # tpe-based mutation (small variance for local exploitation)
             if self.rng.random() < self.tpe_prob:
                 candidate_offspring = []
                 for _ in range(self.num_offspring):
-                    # mutate parent_params
+                    # mutate parent_params with smaller variance
                     candidate_offspring.append(self.param_space.mutate_parameters(
                         candidates[pid].get_params(),
-                        self.mut_var,
+                        self.tpe_mut_var,
                         self.mut_prob,
                         self.rng
                     ))
@@ -320,11 +324,11 @@ class EA(BaseEA):
                 # append offspring recommended by tpe
                 offspring.append(Individual(candidate_offspring[candidate_index], self.param_space.get_model_type()))
 
-            # random mutation
+            # random mutation (large variance for global exploration)
             else:
                 child_params = self.param_space.mutate_parameters(
                     candidates[pid].get_params(),
-                    self.mut_var,
+                    self.explore_mut_var,
                     self.mut_prob,
                     self.rng
                 )
