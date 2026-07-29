@@ -7,7 +7,6 @@
 #SBATCH --job-name=ea_rf
 #SBATCH -p defq,moore
 #SBATCH --array=1-777
-#SBATCH -o logs/output.%j_%a.out # STDOUT
 
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
