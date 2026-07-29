@@ -3,7 +3,7 @@ import numpy as np
 from typing import Dict, Any, Tuple
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
-from sklearn.metrics import roc_auc_score, log_loss
+from sklearn.metrics import roc_auc_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 
@@ -44,8 +44,8 @@ def cv_random_forest(
             train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
             val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
         else:
-            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
-            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
@@ -89,8 +89,8 @@ def cv_kernel_svc(
             train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
             val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
         else:
-            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
-            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
@@ -134,8 +134,8 @@ def cv_gradient_boost(
             train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
             val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
         else:
-            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
-            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
@@ -178,8 +178,8 @@ def cv_knn(
             train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
             val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
         else:
-            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
-            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
         return id, train_acc, val_acc, 1.0
 
     except Exception as e:
@@ -234,8 +234,8 @@ def cv_mlp(
             train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
             val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
         else:
-            train_acc = -float(log_loss(y_train, model.predict_proba(X_train), labels=labels))
-            val_acc = -float(log_loss(y_validate, model.predict_proba(X_validate), labels=labels))
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
 
         return id, train_acc, val_acc, 1.0
 

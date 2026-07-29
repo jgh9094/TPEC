@@ -21,7 +21,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import roc_auc_score, log_loss
+from sklearn.metrics import roc_auc_score
 from openml import tasks
 
 from Source.Base.individual import Individual
@@ -299,8 +299,8 @@ class BaseEA(ABC):
             train_score = float(roc_auc_score(self.y_train, train_pred_proba[:, 1]))
             test_score = float(roc_auc_score(self.y_test, test_pred_proba[:, 1]))
         else:
-            train_score = -float(log_loss(self.y_train, train_pred_proba, labels=self.labels))
-            test_score = -float(log_loss(self.y_test, test_pred_proba, labels=self.labels))
+            train_score = float(roc_auc_score(self.y_train, train_pred_proba, multi_class='ovo', labels=self.labels))
+            test_score = float(roc_auc_score(self.y_test, test_pred_proba, multi_class='ovo', labels=self.labels))
 
         return train_score, test_score
 
