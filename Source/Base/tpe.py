@@ -160,23 +160,22 @@ class TPE:
         self.cat_l: Dict[str, CategoricalPMF] = {} # good, categorical
         self.cat_g: Dict[str, CategoricalPMF] = {} # bad, categorical
 
+        # Parameter order (set during fit, used during sample to ensure consistency)
+        self.numeric_param_names: List[str] = []
+
     def sample(self, num_samples: int, param_space: ModelParams, rng: np.random.Generator) -> List[Dict]:
         """
         Returns 'num_samples' Individuals.
         For each Individual's params, sample from the "good" MultivariateKDE and CategoricalPMFs separately,
         then reassemble into a full set of hyperparameters.
         """
-        numeric_params = {
-            **param_space.get_params_by_type('int'),
-            **param_space.get_params_by_type('float'),
-        }
         categorical_params = {
             **param_space.get_params_by_type('cat'),
             **param_space.get_params_by_type('bool')
         }
 
         # Validate that fitted models exist for parameter types present in the space
-        if numeric_params:
+        if self.numeric_param_names:
             assert self.multi_l is not None and self.multi_g is not None, \
                 "MultivariateKDE models must be fitted when numeric parameters exist."
 
@@ -184,24 +183,22 @@ class TPE:
             assert len(self.cat_l) > 0 and len(self.cat_g) > 0, \
                 "CategoricalPMF models must be fitted when categorical parameters exist."
 
-        numeric_params_names = list(numeric_params.keys())
-
         # Sample from the good numeric distribution
         multi_samples = self.multi_l.sample(rng=rng, n_samples=num_samples) # shape (dimensions, n_samples)
-        assert multi_samples.shape[0] == len(numeric_params_names)
+        assert multi_samples.shape[0] == len(self.numeric_param_names)
         assert multi_samples.shape[1] == num_samples
 
-        # Align numeric parameter names to each dimension
+        # Align numeric parameter names to each dimension (use stored order from fit())
         params = {
             name: list(multi_samples[i])
-            for i, name in enumerate(numeric_params_names)
+            for i, name in enumerate(self.numeric_param_names)
         }
 
         # Make sure parameters are rounded if int and within bounds
         for name, info in param_space.param_space.items():
             if info["type"] == "int":
                 params[name] = [
-                    int(np.clip(val, *info['bounds']))
+                    int(round(np.clip(val, *info['bounds'])))
                     for val in params[name]
                     ]
             if info["type"] == "float":
@@ -241,7 +238,7 @@ class TPE:
 
         # Sort population/samples set (lowest/best first)
         samples.sort(key=lambda o: o.get_val_performance())
-        split_idx = max(1, int(len(samples) * self.gamma))
+        split_idx = max(1, int(np.ceil(len(samples) * self.gamma)))
         good_samples = samples[:split_idx]
         bad_samples = samples[split_idx:]
         return good_samples, bad_samples
@@ -263,13 +260,16 @@ class TPE:
             **param_space.get_params_by_type('bool')
         }
 
+        # Store parameter order for consistency between fit() and sample()
+        self.numeric_param_names = list(numeric_params.keys())
+
         # For each sample set, extract values of numeric hyperparameters
         # Format shape (n_params, n_samples): [[value11, value12,...], [value21, value22, ...], ...]
         # Each parameter has its own row
         good_num_samples = np.array([[o.get_params()[param_name] for o in good_samples]
-                            for param_name in numeric_params])
+                            for param_name in self.numeric_param_names])
         bad_num_samples = np.array([[o.get_params()[param_name] for o in bad_samples]
-                            for param_name in numeric_params])
+                            for param_name in self.numeric_param_names])
 
         # Fit Multivariate KDEs
         self.multi_l = MultivariateKDE(good_num_samples, rng)
@@ -334,11 +334,10 @@ class TPE:
                 l_cat *= lx
                 g_cat *= gx
 
-            # To avoid NaN
-            if (g_num * g_cat) <= 1e-12:
-                ei_scores.append(0.0)
-            else:
-                ei_scores.append((l_num * l_cat) / (g_num * g_cat))
+            # Floor the denominator to avoid division by zero while preserving ranking
+            l_total = l_num * l_cat
+            g_total = max(g_num * g_cat, 1e-12)
+            ei_scores.append(l_total / g_total)
         return np.asarray(ei_scores)
 
     def suggest_one(self, param_space: ModelParams, candidates: List[Dict], rng: np.random.Generator) -> int:
