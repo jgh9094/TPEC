@@ -10,7 +10,7 @@
 #SBATCH -o logs/output.%j_%a.out # STDOUT
 
 source ~/anaconda3/etc/profile.d/conda.sh
-conda activate tpe_ea
+conda activate tpe-ea
 
 # standard parameters used for all experiments
 TRAIN_P=0.80
