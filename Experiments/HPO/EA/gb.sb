@@ -1,0 +1,59 @@
+#!/bin/bash -l
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=00:30:00
+#SBATCH --mem=5G
+#SBATCH --job-name=ea_gb
+#SBATCH -p defq,moore
+#SBATCH --array=1-777
+
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+# standard parameters used for all experiments
+TRAIN_P=0.80
+MODEL=GB
+GENS=3
+POP_SIZE=25
+CORES=8
+MUT_PROB=0.5
+MUT_VAR=0.5
+TPE_PROB=0.0
+TOURNAMENT_SIZE=2
+NUM_OFFSPRING=20
+GAMMA=0.3
+TPE_MUT_SCALE=0.5
+EXPLORE_MUT_SCALE=2.0
+DATA_DIRECTORY=/home/hernandezj45/Repos/TPEC/Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
+# variables that are set by the SLURM job array
+# Array of all task IDs from tasks_summary.csv (37 tasks × 21 replicates = 777 jobs)
+TASK_IDS=(146818 359955 190146 168757 359956 359957 359958 359959 2073 359960 168784 359961 359962 359963 190137 168911 190392 189922 359964 359965 190411 146820 359974 359968 359975 359972 168350 190410 359969 168910 359970 359971 359979 359980 359992 359981 359982)
+
+# Calculate which task and seed based on SLURM_ARRAY_TASK_ID (1-777)
+# Each task gets 21 replicates (seeds 0-20)
+TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 21 ))
+SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
+# specific task id for the OpenML dataset to be used in this experiment
+TASK_ID=${TASK_IDS[$TASK_INDEX]}
+# Output directory for this specific task and seed
+OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/Results/EA/${MODEL}/Task_${TASK_ID}/Seed_${SEED}/
+
+python /home/hernandezj45/Repos/TPEC/Experiments/HPO/runner.py \
+    --seed $SEED \
+    --task_id $TASK_ID \
+    --data_directory $DATA_DIRECTORY \
+    --train_p $TRAIN_P \
+    --output_directory $OUTPUT_DIRECTORY \
+    --model $MODEL \
+    --gens $GENS \
+    --pop_size $POP_SIZE \
+    --cores $CORES \
+    --mut_prob $MUT_PROB \
+    --mut_var $MUT_VAR \
+    --tpe_prob $TPE_PROB \
+    --tournament_size $TOURNAMENT_SIZE \
+    --num_offspring $NUM_OFFSPRING \
+    --gamma $GAMMA \
+    --tpe_mut_scale $TPE_MUT_SCALE \
+    --explore_mut_scale $EXPLORE_MUT_SCALE
