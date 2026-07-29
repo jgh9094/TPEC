@@ -149,6 +149,7 @@ def cv_knn(
     X_validate: np.ndarray,
     y_validate: np.ndarray,
     model_params: Dict[str, Any],
+    random_state: int,
     id: int,
     binary_class: bool,
     labels: np.ndarray

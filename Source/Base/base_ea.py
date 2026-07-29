@@ -277,7 +277,16 @@ class BaseEA(ABC):
             model = KNeighborsClassifier(**eval_params)
         elif model_type == 'MLP':
             eval_params = model_param_space.MLPClassifierParams().eval_parameters(model_params)
-            model = MLPClassifier(**eval_params, random_state=self.seed)
+            layers = (eval_params['layer_1'],
+                      eval_params['layer_2'],
+                      eval_params['layer_3'],
+                      eval_params['layer_4'],
+                      eval_params['layer_5'])
+            model = MLPClassifier(hidden_layer_sizes=layers,
+                                  activation=eval_params['activation'],
+                                  solver=eval_params['solver'],
+                                  max_iter=eval_params['max_iter'],
+                                  random_state=self.seed)
         else:
             raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP']")
 
