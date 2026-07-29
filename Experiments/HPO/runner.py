@@ -8,6 +8,15 @@ import Source.HPO.ea as optimizer
 import argparse
 import ray
 
+
+def is_run_complete(output_directory: str) -> bool:
+    """
+    Check if a run is complete by verifying the existence of best_results.json.
+    A complete run will have: {output_directory}/best_results.json
+    """
+    results_file = os.path.join(output_directory, "best_results.json")
+    return os.path.isfile(results_file)
+
 if __name__ == "__main__":
     # get configs for running EA
     parser = argparse.ArgumentParser(description="Run EA HPO")
@@ -47,6 +56,12 @@ if __name__ == "__main__":
     parser.add_argument('--explore_mut_scale', type=float, required=True, help='Scaling factor for exploration mutation variance.')
 
     args = parser.parse_args()
+
+    # check if run is already complete
+    if is_run_complete(args.output_directory):
+        print(f"Run already complete. Results exist at: {args.output_directory}/best_results.json")
+        print("Skipping execution.")
+        sys.exit(0)
 
     # print all argument values
     print("=" * 60)
