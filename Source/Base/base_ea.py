@@ -11,6 +11,7 @@ import os
 import ray
 import sklearn as skl
 import copy as cp
+import json
 from abc import ABC, abstractmethod
 
 from typeguard import typechecked
@@ -22,7 +23,6 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import roc_auc_score
-from openml import tasks
 
 from Source.Base.individual import Individual
 from Source.Base import model_param_space
@@ -147,10 +147,11 @@ class BaseEA(ABC):
         # generate a 5-fold cross-validation split for the evolutionary algorithm based on the training set and store the indices for each fold
         self.cv_splits = list(skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed).split(self.X_train, self.y_train))
 
-        # get the categorical indicator from OpenML
-        task = tasks.get_task(task_id)
-        dataset = task.get_dataset()
-        categorical_indicator = dataset.get_data()[2]  # (X, y, categorical_indicator, attribute_names)
+        # load the categorical indicator from the data directory
+        categorical_indicator_path = os.path.join(data_dir, f"task_{task_id}_categorical_indicator.json")
+        assert os.path.exists(categorical_indicator_path), f"Categorical indicator file for task {task_id} not found."
+        with open(categorical_indicator_path, 'r') as f:
+            categorical_indicator = json.load(f)
 
         # identify categorical and numerical columns based on the categorical indicator and store for later use
         self.categorical_cols = [col for col, is_cat in zip(self.X_train.columns, categorical_indicator) if is_cat]
