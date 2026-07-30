@@ -64,32 +64,33 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # print all argument values
-    print("=" * 60)
-    print("Experiment Configuration")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("Experiment Configuration", flush=True)
+    print("=" * 60, flush=True)
     print(f"Seed: {args.seed}")
-    print(f"Task ID: {args.task_id}")
-    print(f"Data Directory: {args.data_directory}")
-    print(f"Train Proportion: {args.train_p}")
-    print(f"Output Directory: {args.output_directory}")
-    print(f"Model: {args.model}")
-    print(f"Generations: {args.gens}")
-    print(f"Population Size: {args.pop_size}")
-    print(f"Cores: {args.cores}")
-    print(f"Mutation Probability: {args.mut_prob}")
-    print(f"Mutation Variance: {args.mut_var}")
-    print(f"TPE Probability: {args.tpe_prob}")
-    print(f"Tournament Size: {args.tournament_size}")
-    print(f"Num Offspring: {args.num_offspring}")
-    print(f"Gamma: {args.gamma}")
-    print(f"TPE Mutation Scale: {args.tpe_mut_scale}")
-    print(f"Explore Mutation Scale: {args.explore_mut_scale}")
-    print("=" * 60)
-    print()
+    print(f"Task ID: {args.task_id}", flush=True)
+    print(f"Data Directory: {args.data_directory}", flush=True)
+    print(f"Train Proportion: {args.train_p}", flush=True)
+    print(f"Output Directory: {args.output_directory}", flush=True)
+    print(f"Model: {args.model}", flush=True)
+    print(f"Generations: {args.gens}", flush=True)
+    print(f"Population Size: {args.pop_size}", flush=True)
+    print(f"Cores: {args.cores}", flush=True)
+    print(f"Mutation Probability: {args.mut_prob}", flush=True)
+    print(f"Mutation Variance: {args.mut_var}", flush=True)
+    print(f"TPE Probability: {args.tpe_prob}", flush=True)
+    print(f"Tournament Size: {args.tournament_size}", flush=True)
+    print(f"Num Offspring: {args.num_offspring}", flush=True)
+    print(f"Gamma: {args.gamma}", flush=True)
+    print(f"TPE Mutation Scale: {args.tpe_mut_scale}", flush=True)
+    print(f"Explore Mutation Scale: {args.explore_mut_scale}", flush=True)
+    print("=" * 60, flush=True)
+    print('', flush=True)
 
     # initialize ray
     if not ray.is_initialized():
         ray.init(num_cpus=args.cores, include_dashboard=False, ignore_reinit_error=True)
+    print(f"Ray initialized with {args.cores} cores.", flush=True)
 
     # create EA
     ea = optimizer.EA(
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         tpe_mut_scale=args.tpe_mut_scale,
         explore_mut_scale=args.explore_mut_scale
     )
+    print(f"EA initalized", flush=True)
 
     # load data
     ea.load_data(
@@ -113,6 +115,7 @@ if __name__ == "__main__":
         data_dir=args.data_directory,
         train_p=args.train_p
     )
+    print(f"EA data loaded", flush=True)
 
     # run evolution
     ea.evolve(gens=args.gens)
