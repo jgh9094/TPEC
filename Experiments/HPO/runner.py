@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     # initialize ray
     if not ray.is_initialized():
-        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True)
+        ray.init(num_cpus=args.cores, include_dashboard=False, ignore_reinit_error=True)
 
     # create EA
     ea = optimizer.EA(
