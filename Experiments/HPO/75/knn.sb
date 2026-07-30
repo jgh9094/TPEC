@@ -3,8 +3,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --time=00:30:00
-#SBATCH --mem=30G
-#SBATCH --job-name=ea_knn
+#SBATCH --mem=5G
+#SBATCH --job-name=75_knn
 #SBATCH -p defq,moore
 #SBATCH --array=1-777
 
@@ -19,7 +19,7 @@ POP_SIZE=25
 CORES=8
 MUT_PROB=0.5
 MUT_VAR=0.5
-TPE_PROB=0.0
+TPE_PROB=0.75
 TOURNAMENT_SIZE=2
 NUM_OFFSPRING=20
 GAMMA=0.3
@@ -37,7 +37,7 @@ SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
 # specific task id for the OpenML dataset to be used in this experiment
 TASK_ID=${TASK_IDS[$TASK_INDEX]}
 # Output directory for this specific task and seed
-OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/Results/EA/${MODEL}/Task_${TASK_ID}/Seed_${SEED}/
+OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/Results/75/${MODEL}/Task_${TASK_ID}/Seed_${SEED}/
 
 python /home/hernandezj45/Repos/TPEC/Experiments/HPO/runner.py \
     --seed $SEED \
