@@ -62,8 +62,8 @@ def main():
     args = parser.parse_args()
 
     # Maximum thresholds for filtering datasets (set to None to disable filtering)
-    MAX_ROWS_THRESHOLD = 50000
-    MAX_COLS_THRESHOLD = 1000
+    MAX_ROWS_THRESHOLD = 100000
+    MAX_COLS_THRESHOLD = 200
 
     suite_id = 271
     base_output_dir = "Raw_OpenML_Suite_271_Classification"
