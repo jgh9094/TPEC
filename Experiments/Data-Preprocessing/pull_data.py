@@ -13,6 +13,7 @@ from openml import tasks
 from openml.study import get_suite
 import pandas as pd
 import numpy as np
+import json
 from sklearn.preprocessing import LabelEncoder
 from typeguard import typechecked
 
@@ -145,14 +146,22 @@ def main():
             label_mapping = {original: encoded for encoded, original in enumerate(label_encoder.classes_)}
             print(f"  -> Target label mapping: {label_mapping}")
 
-            # 4. Save the processed dataset to CSV
+            # 4. Get the categorical indicator from OpenML and save it
+            dataset = task.get_dataset()
+            categorical_indicator = dataset.get_data()[2]  # (X, y, categorical_indicator, attribute_names)
+            categorical_indicator_path = os.path.join(output_dir, f"task_{task_id}_categorical_indicator.json")
+            with open(categorical_indicator_path, 'w') as f:
+                json.dump(categorical_indicator, f)
+
+            # 5. Save the processed dataset to CSV
             dataset_csv_path = os.path.join(output_dir, f"task_{task_id}.csv")
             df.to_csv(dataset_csv_path, index=False)
 
             print(f"  -> Saved to {dataset_csv_path}")
+            print(f"  -> Saved categorical indicator to {categorical_indicator_path}")
             print(f"  -> Final dimensions - Rows: {n_rows}, Columns: {n_cols}")
 
-            # 5. Append summary info
+            # 6. Append summary info
             summary_rows.append({
                 "task_id": task_id,
                 "rows": n_rows,
@@ -167,10 +176,10 @@ def main():
             # If anything goes wrong for this task, print and continue
             print(f"Error processing task {task_id}: {e}")
 
-    # 6. Sort summary rows by number of rows
+    # 7. Sort summary rows by number of rows
     summary_rows.sort(key=lambda x: x["rows"])
 
-    # 7. Save the summary CSV for all processed datasets
+    # 8. Save the summary CSV for all processed datasets
     summary_csv_path = os.path.join(output_dir, "tasks_summary.csv")
     with open(summary_csv_path, mode="w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["task_id", "rows", "columns", "minority_class_pct", "majority_class_pct", "num_classes", "target_name"])
