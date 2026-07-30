@@ -2,7 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --mem=5G
 #SBATCH --job-name=75_gb
 #SBATCH -p defq,moore
