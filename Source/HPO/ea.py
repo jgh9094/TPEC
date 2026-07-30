@@ -145,7 +145,6 @@ class EA(BaseEA):
 
         # keep track of best
         self.update_best_seen(self.population)
-        print(f"Initial population size: {len(self.population)}", flush=True)
         print(f"Best performance so far (Gen 0): {self.best_perf}", flush=True)
 
         # Start evolution
@@ -249,41 +248,34 @@ class EA(BaseEA):
         Returns:
             List[Individual]: The evaluated individuals with updated performance metrics.
         """
-        # get CV splits from base class
+        # get CV splits from base class (already preprocessed and in Ray object store)
         cv_splits = self.get_cv_splits()
 
+        # Create one Ray task per individual (all 5 folds processed in single task)
         ray_jobs = []
-        # Create Ray tasks for each individual across all 5 folds
         for model_id, ind in enumerate(candidates):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(self.ray_train_func.remote(
-                    X_train=X_train,
-                    y_train=y_train,
-                    X_validate=X_validate,
-                    y_validate=y_validate,
-                    model_params=self.param_space.eval_parameters(ind.get_params()),
-                    random_state=self.seed,
-                    id=model_id,
-                    binary_class=self.binary_classification,
-                    labels=self.labels
-                ))
-
-        # Initialize results storage
-        pop_results = {i: {'train_acc': [], 'val_acc': []} for i in range(len(candidates))}
+            ray_jobs.append(self.ray_train_func.remote(
+                cv_splits=cv_splits,
+                model_params=self.param_space.eval_parameters(ind.get_params()),
+                random_state=self.seed,
+                id=model_id,
+                binary_class=self.binary_classification,
+                labels=self.labels
+            ))
 
         # Gather results as they complete
+        pop_results = {}
         while len(ray_jobs) > 0:
             finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
             for done_id in finished:
                 model_id, train_acc, val_acc, error = ray.get(done_id)
                 assert error > 0.0, f"Error during model training/evaluation for model_id {model_id}."
-                pop_results[model_id]['train_acc'].append(train_acc)
-                pop_results[model_id]['val_acc'].append(val_acc)
+                pop_results[model_id] = {'train_acc': train_acc, 'val_acc': val_acc}
 
         # Assign performances to individuals
         for i, ind in enumerate(candidates):
-            ind.set_train_performance(float(np.mean(pop_results[i]['train_acc'])))
-            ind.set_val_performance(float(np.mean(pop_results[i]['val_acc'])))
+            ind.set_train_performance(pop_results[i]['train_acc'])
+            ind.set_val_performance(pop_results[i]['val_acc'])
 
         return candidates
 

@@ -170,6 +170,7 @@ class BaseEA(ABC):
         numerical_cols = self.numerical_cols
 
         # generate each fold's train and validation sets with preprocessing
+        cv_fold_data = []
         for fold_idx in range(5):
             X_train_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][0]].reset_index(drop=True)
             X_val_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][1]].reset_index(drop=True)
@@ -182,31 +183,26 @@ class BaseEA(ABC):
                 remainder='passthrough'
             )
 
-            X_train_transformed = ray.put(preprocessor.fit_transform(X_train_fold_raw))
-            X_val_transformed = ray.put(preprocessor.transform(X_val_fold_raw))
-            y_train_fold = ray.put(self.y_train[self.cv_splits[fold_idx][0]])
-            y_val_fold = ray.put(self.y_train[self.cv_splits[fold_idx][1]])
+            X_train_transformed = preprocessor.fit_transform(X_train_fold_raw)
+            X_val_transformed = preprocessor.transform(X_val_fold_raw)
+            y_train_fold = self.y_train[self.cv_splits[fold_idx][0]]
+            y_val_fold = self.y_train[self.cv_splits[fold_idx][1]]
 
-            # store as instance attributes dynamically
-            setattr(self, f'X_train_f{fold_idx+1}_rf', X_train_transformed)
-            setattr(self, f'X_val_f{fold_idx+1}_rf', X_val_transformed)
-            setattr(self, f'y_train_f{fold_idx+1}_rf', y_train_fold)
-            setattr(self, f'y_val_f{fold_idx+1}_rf', y_val_fold)
+            cv_fold_data.append((X_train_transformed, y_train_fold, X_val_transformed, y_val_fold))
+
+        # store entire CV splits as single Ray object reference
+        self.cv_splits_ref = ray.put(cv_fold_data)
 
         return
 
-    def get_cv_splits(self) -> List[Tuple]:
+    def get_cv_splits(self) -> Any:
         """
-        Returns the list of CV split data tuples for evaluation.
+        Returns the Ray object reference containing all CV split data.
 
         Returns:
-            List[Tuple]: List of tuples containing (X_train, y_train, X_val, y_val) Ray references.
+            Ray ObjectRef containing list of (X_train, y_train, X_val, y_val) tuples.
         """
-        return [
-            (getattr(self, f'X_train_f{i}_rf'), getattr(self, f'y_train_f{i}_rf'),
-             getattr(self, f'X_val_f{i}_rf'), getattr(self, f'y_val_f{i}_rf'))
-            for i in range(1, 6)
-        ]
+        return self.cv_splits_ref
 
     def mutate(self, individual: Individual) -> Individual:
             """
