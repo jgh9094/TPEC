@@ -12,7 +12,7 @@ source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
 
 # standard parameters used for all experiments
-TRAIN_P=0.80
+TRAIN_P=0.70
 MODEL=RF
 GENS=3
 POP_SIZE=25
