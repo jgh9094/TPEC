@@ -62,8 +62,9 @@ def main():
     args = parser.parse_args()
 
     # Maximum thresholds for filtering datasets (set to None to disable filtering)
-    MAX_ROWS_THRESHOLD = 100000
+    MAX_ROWS_THRESHOLD = 80000
     MAX_COLS_THRESHOLD = 200
+    MAX_CLASSES_THRESHOLD = 10  # Exclude datasets with more than 10 classes
 
     suite_id = 271
     base_output_dir = "Raw_OpenML_Suite_271_Classification"
@@ -110,6 +111,10 @@ def main():
 
             if MAX_COLS_THRESHOLD is not None and n_cols >= MAX_COLS_THRESHOLD:
                 print(f"  -> Task {task_id} exceeds MAX_COLS_THRESHOLD ({n_cols} >= {MAX_COLS_THRESHOLD}). Skipping.")
+                continue
+
+            if MAX_CLASSES_THRESHOLD is not None and num_classes > MAX_CLASSES_THRESHOLD:
+                print(f"  -> Task {task_id} has too many classes ({num_classes} > {MAX_CLASSES_THRESHOLD}). Skipping.")
                 continue
 
             print(f"  -> Task {task_id} meets criteria. N: {n_rows}, M: {n_cols}, Minority: {minority_pct:.2f}%, Majority: {majority_pct:.2f}%, Num classes: {num_classes}")
