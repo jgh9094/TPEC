@@ -5,7 +5,7 @@
 #SBATCH --time=03:00:00
 #SBATCH --mem=200G
 #SBATCH --job-name=1h_mlp
-#SBATCH -p defq,moore
+#SBATCH -p defq,moore,preemptable
 #SBATCH --array=1-714
 
 source ~/anaconda3/etc/profile.d/conda.sh
