@@ -14,7 +14,7 @@ conda activate tpe-ea
 # standard parameters used for all experiments
 TRAIN_P=0.70
 MODEL=GB
-GENS=3
+GENS=1
 POP_SIZE=25
 CORES=$SLURM_CPUS_PER_TASK
 MUT_PROB=0.5
