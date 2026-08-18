@@ -382,7 +382,7 @@ class GradientBoostParams(ModelParams):
     def __init__(self, binary_class: bool, offset: float = 1.0e-4):
         super().__init__(param_space = {
             'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat') if binary_class else CatParam(bounds=('log_loss',), type='cat'),
-            'learning_rate': FloatParam(bounds=(0.0 + offset, 1.0), type='float'),
+            'learning_rate': FloatParam(bounds=(0.0 + offset, 0.5), type='float'),
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
             'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
