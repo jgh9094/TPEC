@@ -6,7 +6,7 @@
 #SBATCH --mem=200G
 #SBATCH --job-name=50_gb
 #SBATCH -p defq,moore,preemptable
-#SBATCH --array=1-714
+#SBATCH --array=1-546
 
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
@@ -27,10 +27,10 @@ TPE_MUT_SCALE=0.5
 EXPLORE_MUT_SCALE=2.0
 DATA_DIRECTORY=/home/hernandezj45/Repos/TPEC/Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
 # variables that are set by the SLURM job array
-# Array of all task IDs from tasks_summary.csv (34 tasks × 21 replicates = 714 jobs)
-TASK_IDS=(146818 359955 190146 168757 359956 359958 359959 2073 359960 168784 359962 359963 190137 168911 359964 359965 190411 146820 359974 359968 359975 359972 168350 359969 359970 359971 359979 359980 359992 359981 359982 359987 359985 359977)
+# Array of all task IDs from tasks_summary.csv (26 tasks × 21 replicates = 546 jobs)
+TASK_IDS=(146818 359955 190146 168757 359956 359958 359959 2073 359960 168784 359962 359963 190137 168911 359964 359965 190411 146820 359974 359968 359975 359972 168350 359969 359970 359971)
 
-# Calculate which task and seed based on SLURM_ARRAY_TASK_ID (1-714)
+# Calculate which task and seed based on SLURM_ARRAY_TASK_ID (1-546)
 # Each task gets 21 replicates (seeds 0-20)
 TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 21 ))
 SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
