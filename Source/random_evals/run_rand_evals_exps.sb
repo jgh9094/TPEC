@@ -1,0 +1,48 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=24
+#SBATCH --time=07-00:00:00
+#SBATCH --mem=25000MB
+#SBATCH --job-name=rand_evals
+#SBATCH -p defq,moore
+#SBATCH --array=1-160
+#SBATCH -o logs/rand_evals.%j_%a.out
+
+source /home/sainia3/anaconda3/etc/profile.d/conda.sh
+conda activate tpotenv
+
+# Submit this file from the repository root. The 160 array jobs cover the
+# 16 tasks in tasks_summary.csv and 10 uniquely seeded replicates per task.
+PROJECT_ROOT="${SLURM_SUBMIT_DIR}"
+DATA_DIRECTORY="${PROJECT_ROOT}/Data/Raw_OpenML_Suite_271_Binary_Classification"
+OUTPUT_DIRECTORY="${PROJECT_ROOT}/Results/random_evals"
+PYTHON_SCRIPT="${PROJECT_ROOT}/Source/random_evals/random_evals_exp.py"
+TASK_SUMMARY="${DATA_DIRECTORY}/tasks_summary.csv"
+
+REPLICATES_PER_TASK=10
+TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / REPLICATES_PER_TASK ))
+REPLICATE=$(( (SLURM_ARRAY_TASK_ID - 1) % REPLICATES_PER_TASK ))
+SUMMARY_LINE=$(( TASK_INDEX + 2 ))
+TASK_ID=$(awk -F, -v line="${SUMMARY_LINE}" 'NR == line {gsub(/\r/, "", $1); print $1}' "${TASK_SUMMARY}")
+
+if [[ -z "${TASK_ID}" ]]; then
+    echo "No task found for array index ${SLURM_ARRAY_TASK_ID} in ${TASK_SUMMARY}."
+    exit 1
+fi
+
+echo "Task ${TASK_ID}, replicate ${REPLICATE}, split seed ${REPLICATE}"
+
+srun python "${PYTHON_SCRIPT}" \
+    --task_id "${TASK_ID}" \
+    --data_directory "${DATA_DIRECTORY}" \
+    --output_directory "${OUTPUT_DIRECTORY}" \
+    --model RF \
+    --budgets 10 100 1000 \
+    --replicates 1 \
+    --replicate_start "${REPLICATE}" \
+    --base_seed 0 \
+    --train_size 0.7 \
+    --cv_folds 5 \
+    --n_jobs "${SLURM_CPUS_PER_TASK}"
