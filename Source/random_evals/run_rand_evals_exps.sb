@@ -7,21 +7,21 @@
 #SBATCH --mem=25000MB
 #SBATCH --job-name=rand_evals
 #SBATCH -p defq,moore
-#SBATCH --array=1-160
+#SBATCH --array=1-320
 #SBATCH -o logs/rand_evals.%j_%a.out
 
 source /home/sainia3/anaconda3/etc/profile.d/conda.sh
 conda activate tpotenv
 
-# Submit this file from the repository root. The 160 array jobs cover the
-# 16 tasks in tasks_summary.csv and 10 uniquely seeded replicates per task.
+# Submit this file from the repository root. The 320 array jobs cover the
+# 16 tasks in tasks_summary.csv and 20 uniquely seeded replicates per task.
 PROJECT_ROOT="${SLURM_SUBMIT_DIR}"
 DATA_DIRECTORY="${PROJECT_ROOT}/Data/Raw_OpenML_Suite_271_Binary_Classification"
 OUTPUT_DIRECTORY="${PROJECT_ROOT}/Results/random_evals"
 PYTHON_SCRIPT="${PROJECT_ROOT}/Source/random_evals/random_evals_exp.py"
 TASK_SUMMARY="${DATA_DIRECTORY}/tasks_summary.csv"
 
-REPLICATES_PER_TASK=10
+REPLICATES_PER_TASK=20
 TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / REPLICATES_PER_TASK ))
 REPLICATE=$(( (SLURM_ARRAY_TASK_ID - 1) % REPLICATES_PER_TASK ))
 SUMMARY_LINE=$(( TASK_INDEX + 2 ))

@@ -2,10 +2,10 @@
 """Run reproducible random-search HPO experiments.
 
 For each replicate, this script makes one stratified train/test split using a
-unique seed, samples 1,000 random model configurations, and reports the best
-configuration after the first 10, 100, and 1,000 evaluations.  Treating the
-smaller budgets as checkpoints of the same random sequence makes comparisons
-paired and avoids repeating evaluations.
+unique seed and runs three independent random searches containing 10, 100, and
+1,000 model evaluations. Thus, the default configuration performs 1,110 model
+evaluations per replicate. The data split is shared within a replicate, while
+each evaluation budget has its own reproducible random-number stream.
 
 Example
 -------
@@ -53,7 +53,7 @@ from Source.Base.model_param_space import (  # noqa: E402
 
 
 DEFAULT_BUDGETS = (10, 100, 1000)
-DEFAULT_REPLICATES = 10
+DEFAULT_REPLICATES = 20
 MODEL_NAMES = ("RF", "KSVC", "GB", "KNN", "MLP")
 
 
@@ -346,7 +346,7 @@ def run_replicate(
     cv_folds: int,
     n_jobs: int,
 ) -> List[Dict[str, Any]]:
-    """Run all nested random-search budgets for one train/test replicate."""
+    """Run independent random searches for one shared train/test replicate."""
     replicate_directory = output_directory / f"Task_{task_id}" / model_name / f"Replicate_{replicate}"
     replicate_directory.mkdir(parents=True, exist_ok=True)
 
@@ -364,101 +364,121 @@ def run_replicate(
     binary_classification = len(labels) == 2
     cv_data = prepare_cv_data(X_train, y_train, categorical_indicator, seed, cv_folds)
 
-    rng = np.random.default_rng(seed)
-    parameter_sampler = get_parameter_sampler(model_name, binary_classification)
-    records: List[Dict[str, Any]] = []
+    all_records: List[Dict[str, Any]] = []
     summaries: List[Dict[str, Any]] = []
-    maximum_budget = max(budgets)
-    progress_interval = max(1, maximum_budget // 10)
+    total_evaluations = sum(budgets)
 
-    print(f"Replicate {replicate + 1}: split seed={seed}, evaluations={maximum_budget}", flush=True)
-    for evaluation in range(1, maximum_budget + 1):
-        sampled_params = parameter_sampler.generate_random_parameters(rng)
-        model_seed = seed * (maximum_budget + 1) + evaluation
-        started_at = time.perf_counter()
-        record: Dict[str, Any] = {
-            "task_id": task_id,
-            "model": model_name,
-            "replicate": replicate,
-            "split_seed": seed,
-            "model_seed": model_seed,
-            "evaluation": evaluation,
-            "sampled_params": json_safe(sampled_params),
-            "effective_params": None,
-            "train_cv_score": np.nan,
-            "validation_cv_score": np.nan,
-            "succeeded": False,
-            "error": None,
-        }
-        try:
-            train_score, validation_score, effective_params = evaluate_configuration(
-                model_name,
-                sampled_params,
-                model_seed,
-                n_jobs,
-                cv_data,
-                labels,
-            )
-            record.update(
-                {
-                    "effective_params": json_safe(effective_params),
-                    "train_cv_score": train_score,
-                    "validation_cv_score": validation_score,
-                    "succeeded": True,
-                }
-            )
-        except Exception as error:  # Keep a failed configuration in the evaluation count.
-            record["error"] = f"{type(error).__name__}: {error}"
-            print(f"  Evaluation {evaluation} failed: {record['error']}", flush=True)
-        record["elapsed_seconds"] = time.perf_counter() - started_at
-        records.append(record)
+    print(
+        f"Replicate {replicate + 1}: split seed={seed}, "
+        f"independent evaluations={total_evaluations}",
+        flush=True,
+    )
+    for budget in budgets:
+        # Derive separate, stable streams for parameter sampling and estimator
+        # randomness. Including the budget ensures that no budget is a prefix of
+        # another budget's random-search sequence.
+        parameter_seed = int(
+            np.random.SeedSequence([seed, budget, 0]).generate_state(1, dtype=np.uint32)[0]
+        )
+        model_seed_rng = np.random.default_rng(np.random.SeedSequence([seed, budget, 1]))
+        parameter_rng = np.random.default_rng(parameter_seed)
+        parameter_sampler = get_parameter_sampler(model_name, binary_classification)
+        records: List[Dict[str, Any]] = []
+        progress_interval = max(1, budget // 10)
 
-        if evaluation in budgets or evaluation % progress_interval == 0:
-            print(f"  Completed {evaluation}/{maximum_budget} evaluations", flush=True)
-
-        # Save each requested budget as soon as it is reached. A 1,000-evaluation
-        # replicate can be long, so the 10- and 100-evaluation results should not
-        # depend on the rest of the run completing.
-        if evaluation in budgets:
-            write_evaluation_records(replicate_directory / "evaluations.csv", records)
-            best_record = best_successful_record(records)
-            train_score, test_score = evaluate_on_test_set(
-                model_name,
-                best_record["effective_params"],
-                best_record["model_seed"],
-                n_jobs,
-                X_train,
-                X_test,
-                y_train,
-                y_test,
-                categorical_indicator,
-                labels,
-            )
-            summary = {
+        print(f"  Starting independent budget {budget} (seed={parameter_seed})", flush=True)
+        for evaluation in range(1, budget + 1):
+            sampled_params = parameter_sampler.generate_random_parameters(parameter_rng)
+            model_seed = int(model_seed_rng.integers(0, np.iinfo(np.int32).max))
+            started_at = time.perf_counter()
+            record: Dict[str, Any] = {
                 "task_id": task_id,
                 "model": model_name,
-                "metric": "roc_auc_ovo_macro" if len(labels) > 2 else "roc_auc",
                 "replicate": replicate,
                 "split_seed": seed,
-                "train_size": train_size,
-                "cv_folds": cv_folds,
-                "evaluation_budget": evaluation,
-                "successful_evaluations": sum(record["succeeded"] for record in records),
-                "best_evaluation": best_record["evaluation"],
-                "best_params": best_record["effective_params"],
-                "best_validation_cv_score": best_record["validation_cv_score"],
-                "train_score": train_score,
-                "test_score": test_score,
+                "evaluation_budget": budget,
+                "random_search_seed": parameter_seed,
+                "model_seed": model_seed,
+                "evaluation": evaluation,
+                "sampled_params": json_safe(sampled_params),
+                "effective_params": None,
+                "train_cv_score": np.nan,
+                "validation_cv_score": np.nan,
+                "succeeded": False,
+                "error": None,
             }
-            write_json(replicate_directory / f"budget_{evaluation}_best_results.json", summary)
-            summaries.append(summary)
-            print(
-                f"  Budget {evaluation}: validation={best_record['validation_cv_score']:.6f}, "
-                f"test={test_score:.6f}",
-                flush=True,
-            )
+            try:
+                train_score, validation_score, effective_params = evaluate_configuration(
+                    model_name,
+                    sampled_params,
+                    model_seed,
+                    n_jobs,
+                    cv_data,
+                    labels,
+                )
+                record.update(
+                    {
+                        "effective_params": json_safe(effective_params),
+                        "train_cv_score": train_score,
+                        "validation_cv_score": validation_score,
+                        "succeeded": True,
+                    }
+                )
+            except Exception as error:  # Keep a failed configuration in the evaluation count.
+                record["error"] = f"{type(error).__name__}: {error}"
+                print(
+                    f"    Budget {budget}, evaluation {evaluation} failed: {record['error']}",
+                    flush=True,
+                )
+            record["elapsed_seconds"] = time.perf_counter() - started_at
+            records.append(record)
 
-    write_evaluation_records(replicate_directory / "evaluations.csv", records)
+            if evaluation % progress_interval == 0 or evaluation == budget:
+                print(f"    Completed {evaluation}/{budget} evaluations", flush=True)
+                write_evaluation_records(
+                    replicate_directory / f"budget_{budget}_evaluations.csv",
+                    records,
+                )
+
+        best_record = best_successful_record(records)
+        train_score, test_score = evaluate_on_test_set(
+            model_name,
+            best_record["effective_params"],
+            best_record["model_seed"],
+            n_jobs,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+            categorical_indicator,
+            labels,
+        )
+        summary = {
+            "task_id": task_id,
+            "model": model_name,
+            "metric": "roc_auc_ovo_macro" if len(labels) > 2 else "roc_auc",
+            "replicate": replicate,
+            "split_seed": seed,
+            "random_search_seed": parameter_seed,
+            "train_size": train_size,
+            "cv_folds": cv_folds,
+            "evaluation_budget": budget,
+            "successful_evaluations": sum(record["succeeded"] for record in records),
+            "best_evaluation": best_record["evaluation"],
+            "best_params": best_record["effective_params"],
+            "best_validation_cv_score": best_record["validation_cv_score"],
+            "train_score": train_score,
+            "test_score": test_score,
+        }
+        write_json(replicate_directory / f"budget_{budget}_best_results.json", summary)
+        summaries.append(summary)
+        all_records.extend(records)
+        write_evaluation_records(replicate_directory / "evaluations.csv", all_records)
+        print(
+            f"  Budget {budget}: validation={best_record['validation_cv_score']:.6f}, "
+            f"test={test_score:.6f}",
+            flush=True,
+        )
 
     write_json(
         replicate_directory / "replicate_summary.json",
@@ -490,8 +510,8 @@ def validate_arguments(args: argparse.Namespace) -> Tuple[int, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate random ML hyperparameters at nested 10/100/1000 budgets "
-            "over 10 uniquely seeded train/test replicates."
+            "Evaluate random ML hyperparameters in independent 10/100/1000 searches "
+            "over 20 uniquely seeded train/test replicates."
         )
     )
     parser.add_argument("--task_id", type=int, required=True, help="OpenML task ID to evaluate.")
@@ -513,13 +533,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         nargs="+",
         default=list(DEFAULT_BUDGETS),
-        help="Nested evaluation checkpoints (default: 10 100 1000).",
+        help="Independent random-search budgets (default: 10 100 1000).",
     )
     parser.add_argument(
         "--replicates",
         type=int,
         default=DEFAULT_REPLICATES,
-        help="Number of train/test replicates (default: 10).",
+        help="Number of train/test replicates (default: 20).",
     )
     parser.add_argument(
         "--base_seed",
@@ -568,7 +588,8 @@ def main() -> int:
             "train_size": args.train_size,
             "cv_folds": args.cv_folds,
             "n_jobs": args.n_jobs,
-            "budgets_are_nested": True,
+            "budgets_are_nested": False,
+            "total_evaluations_per_replicate": sum(budgets),
         }
         write_json(
             experiment_directory / "run_configs" / f"{run_label}.json",
