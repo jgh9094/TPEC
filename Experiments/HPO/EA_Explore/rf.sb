@@ -41,8 +41,8 @@ OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/Results/EA_Explore/${MODEL}/Task_
 
 python /home/hernandezj45/Repos/TPEC/Experiments/HPO/runner.py \
     --seed $SEED \
-    --task $TASK_ID \
-    --data_directory $DATA_DIRECTORY \
+    --y_label $TASK_ID \
+    --data_path $DATA_DIRECTORY \
     --train_p $TRAIN_P \
     --output_directory $OUTPUT_DIRECTORY \
     --model $MODEL \
@@ -56,4 +56,5 @@ python /home/hernandezj45/Repos/TPEC/Experiments/HPO/runner.py \
     --num_offspring $NUM_OFFSPRING \
     --gamma $GAMMA \
     --tpe_mut_scale $TPE_MUT_SCALE \
-    --explore_mut_scale $EXPLORE_MUT_SCALE
+    --explore_mut_scale $EXPLORE_MUT_SCALE \
+    --task so
