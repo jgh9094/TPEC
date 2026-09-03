@@ -7,11 +7,9 @@
 
 import numpy as np
 import pandas as pd
-import os
 import ray
 import sklearn as skl
 import copy as cp
-import json
 from abc import ABC, abstractmethod
 
 from typeguard import typechecked
@@ -91,53 +89,62 @@ class BaseEA(ABC):
 
         return
 
-    def load_data(self,
-                  task_id: int,
-                  data_dir: str,
-                  train_p: float) -> None:
+    def load_data_pd(self,
+                     data: pd.DataFrame,
+                     target_label: str,
+                     train_p: float,
+                     one_hot_cols: Optional[List[str]] = None,
+                     scalar_cols: Optional[List[str]] = None) -> None:
         """
-        Loads the dataset for the specified OpenML task ID and applies preprocessing.
-        data_dir must contain task_{task_id}.csv and tasks_summary.csv files.
+        Loads a dataset from an in-memory pandas DataFrame and applies preprocessing.
+
+        The DataFrame must contain all the X features and the Y label to predict.
+        Columns listed in `one_hot_cols` are one-hot-encoded and columns listed in
+        `scalar_cols` are transformed via StandardScaler. If a list is empty (or None)
+        the corresponding transformation is skipped; any columns not listed in either
+        list are passed through unchanged.
 
         Args:
-            task_id (int): OpenML task ID to load dataset from.
-            data_dir (str): Directory where datasets are stored.
+            data (pd.DataFrame): DataFrame containing all X features and the Y label.
+            target_label (str): Name of the column to predict (the Y label).
             train_p (float): Proportion of the dataset to use for training.
+            one_hot_cols (Optional[List[str]]): Feature columns to one-hot-encode.
+            scalar_cols (Optional[List[str]]): Feature columns to scale via StandardScaler.
         """
+        # normalize the column lists so empty/None are treated the same
+        one_hot_cols = list(one_hot_cols) if one_hot_cols else []
+        scalar_cols = list(scalar_cols) if scalar_cols else []
+
         # quick sanity checks
-        assert task_id > 0, "Task ID must be a positive integer."
-        assert os.path.exists(data_dir), f"Data directory '{data_dir}' does not exist."
-        assert os.path.exists(os.path.join(data_dir, f"task_{task_id}.csv")), f"Dataset file for task {task_id} not found."
-        assert os.path.exists(os.path.join(data_dir, f"tasks_summary.csv")), f"Summary file for task {task_id} not found."
+        assert 0.0 < train_p < 1.0, "train_p must be between 0 and 1 (exclusive)."
+        assert target_label in data.columns, f"Target label '{target_label}' not found in DataFrame columns."
 
-        # store task_id for later use
-        self.task_id = task_id
+        feature_cols = [col for col in data.columns if col != target_label]
+        for col in one_hot_cols:
+            assert col in feature_cols, f"One-hot column '{col}' is not a feature column in the DataFrame."
+        for col in scalar_cols:
+            assert col in feature_cols, f"Scale column '{col}' is not a feature column in the DataFrame."
+        overlap = set(one_hot_cols) & set(scalar_cols)
+        assert not overlap, f"Columns cannot be both one-hot-encoded and scaled: {sorted(overlap)}."
 
-        # load the summary CSV
-        summary_csv = pd.read_csv(os.path.join(data_dir, f"tasks_summary.csv"))
-
-        # find the row corresponding to the specified task_id
-        tasks_summary_row = summary_csv[summary_csv['task_id'] == task_id]
-        assert not tasks_summary_row.empty, f"No summary information found for task {task_id}."
-
-        # extract target_name to know which column is the target variable
-        target_name = tasks_summary_row['target_name'].values[0]
-        assert target_name is not None, f"Target name for task {task_id} is missing in the summary."
-
-        # extract the number of classes to determine if it's a binary or multi-class classification problem
-        num_classes = tasks_summary_row['num_classes'].values[0]
-        assert num_classes is not None, f"Number of classes for task {task_id} is missing in the summary."
-        self.binary_classification = bool(num_classes == 2)
-
-        # load the specified dataset
-        self.data_set = pd.read_csv(os.path.join(data_dir, f"task_{task_id}.csv"))
+        # store the dataset and the columns to transform for later use
+        self.data_set = data.reset_index(drop=True)
+        self.categorical_cols = one_hot_cols
+        self.numerical_cols = scalar_cols
 
         # split the dataset into features and target
-        X = self.data_set.drop(columns=[target_name])
-        y = self.data_set[target_name].values
+        X = self.data_set.drop(columns=[target_label])
+        y = self.data_set[target_label].values
 
-        # make a list of all unique classes in the target variable
+        # print dimesionality of X
+        print(f"Loaded dataset with {X.shape[0]} rows and {X.shape[1]} features.")
+
+        # make a list of all unique classes in the target variable and determine problem type
         self.labels = np.unique(y)
+        self.binary_classification = bool(len(self.labels) == 2)
+
+        # print the unique classes
+        print(f"Unique classes in target variable '{target_label}': {self.labels}")
 
         # generate an initial train-test split for the evolutionary algorithm (train_p is the proportion of the dataset to use for training)
         self.X_train, self.X_test, self.y_train, self.y_test = skl.model_selection.train_test_split(
@@ -147,16 +154,6 @@ class BaseEA(ABC):
         # generate a 5-fold cross-validation split for the evolutionary algorithm based on the training set and store the indices for each fold
         self.cv_splits = list(skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed).split(self.X_train, self.y_train))
 
-        # load the categorical indicator from the data directory
-        categorical_indicator_path = os.path.join(data_dir, f"task_{task_id}_categorical_indicator.json")
-        assert os.path.exists(categorical_indicator_path), f"Categorical indicator file for task {task_id} not found."
-        with open(categorical_indicator_path, 'r') as f:
-            categorical_indicator = json.load(f)
-
-        # identify categorical and numerical columns based on the categorical indicator and store for later use
-        self.categorical_cols = [col for col, is_cat in zip(self.X_train.columns, categorical_indicator) if is_cat]
-        self.numerical_cols = [col for col, is_cat in zip(self.X_train.columns, categorical_indicator) if not is_cat]
-
         # prepare CV fold data
         self._prepare_cv_folds()
 
@@ -164,43 +161,66 @@ class BaseEA(ABC):
 
     def _prepare_cv_folds(self) -> None:
         """
-        Prepares cross-validation fold data with preprocessing and stores in Ray object store.
-        """
-        categorical_cols = self.categorical_cols
-        numerical_cols = self.numerical_cols
+        Prepares cross-validation fold data with preprocessing and stores each fold
+        independently in the Ray object store.
 
+        Every fold is preprocessed on its own: the preprocessor is fit on the fold's
+        training partition and then used to transform both the training and validation
+        partitions, which prevents data leakage. The four resulting arrays for each fold
+        (X_train, y_train, X_val, y_val) are placed in the Ray object store individually
+        so that a single fold can be loaded by a dedicated per-fold evaluation task.
+        """
         # generate each fold's train and validation sets with preprocessing
-        cv_fold_data = []
+        cv_fold_refs = []
         for fold_idx in range(5):
             X_train_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][0]].reset_index(drop=True)
             X_val_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][1]].reset_index(drop=True)
 
-            preprocessor = ColumnTransformer(
-                transformers=[
-                    ('num', StandardScaler(), numerical_cols),
-                    ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), categorical_cols)
-                ],
-                remainder='passthrough'
-            )
+            preprocessor = self._build_preprocessor()
 
+            # fit on the training partition only, then transform both (no leakage)
             X_train_transformed = preprocessor.fit_transform(X_train_fold_raw)
             X_val_transformed = preprocessor.transform(X_val_fold_raw)
             y_train_fold = self.y_train[self.cv_splits[fold_idx][0]]
             y_val_fold = self.y_train[self.cv_splits[fold_idx][1]]
 
-            cv_fold_data.append((X_train_transformed, y_train_fold, X_val_transformed, y_val_fold))
+            # place each fold's data in the Ray object store as separate references
+            cv_fold_refs.append((
+                ray.put(X_train_transformed),
+                ray.put(y_train_fold),
+                ray.put(X_val_transformed),
+                ray.put(y_val_fold),
+            ))
 
-        # store entire CV splits as single Ray object reference
-        self.cv_splits_ref = ray.put(cv_fold_data)
+        # store the per-fold (X_train, y_train, X_val, y_val) Ray object references
+        self.cv_splits_ref = cv_fold_refs
 
         return
 
-    def get_cv_splits(self) -> Any:
+    def _build_preprocessor(self) -> ColumnTransformer:
+            """
+            Builds a ColumnTransformer that scales the numerical columns and one-hot-encodes
+            the categorical columns. Transformations whose column list is empty are omitted so
+            that only the requested operations are applied; all remaining columns pass through.
+
+            Returns:
+                ColumnTransformer: The configured preprocessor.
+            """
+            transformers = []
+            if self.numerical_cols:
+                transformers.append(('num', StandardScaler(), self.numerical_cols))
+            if self.categorical_cols:
+                transformers.append(('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), self.categorical_cols))
+
+            return ColumnTransformer(transformers=transformers, remainder='passthrough')
+
+    def get_cv_splits(self) -> List[Tuple]:
         """
-        Returns the Ray object reference containing all CV split data.
+        Returns the per-fold CV data as a list of Ray object reference tuples.
 
         Returns:
-            Ray ObjectRef containing list of (X_train, y_train, X_val, y_val) tuples.
+            List[Tuple]: One (X_train, y_train, X_val, y_val) tuple of Ray ObjectRefs
+            per fold, so that each fold can be dispatched to its own evaluation task.
         """
         return self.cv_splits_ref
 
@@ -249,20 +269,14 @@ class BaseEA(ABC):
         assert self.y_train is not None and self.y_test is not None, "Data must be loaded before evaluation."
         assert self.binary_classification is not None, "Data must be loaded before evaluation."
 
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', StandardScaler(), self.numerical_cols),
-                ('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), self.categorical_cols)
-            ],
-            remainder='passthrough'
-        )
+        preprocessor = self._build_preprocessor()
 
         X_train_preprocessed = preprocessor.fit_transform(self.X_train)
         X_test_preprocessed = preprocessor.transform(self.X_test)
 
         if model_type == 'RF':
             eval_params = model_param_space.RandomForestParams().eval_parameters(model_params)
-            model = RandomForestClassifier(**eval_params, random_state=self.seed)
+            model = RandomForestClassifier(**eval_params, random_state=self.seed, n_jobs=self.cores)
         elif model_type == 'KSVC':
             eval_params = model_param_space.KernelSVCParams().eval_parameters(model_params)
             model = SVC(**eval_params, random_state=self.seed, probability=True)
@@ -271,7 +285,7 @@ class BaseEA(ABC):
             model = GradientBoostingClassifier(**eval_params, random_state=self.seed)
         elif model_type == 'KNN':
             eval_params = model_param_space.KNeighborsClassifierParams().eval_parameters(model_params)
-            model = KNeighborsClassifier(**eval_params)
+            model = KNeighborsClassifier(**eval_params, n_jobs=self.cores)
         elif model_type == 'MLP':
             eval_params = model_param_space.MLPClassifierParams().eval_parameters(model_params)
             layers = (eval_params['layer_1'],

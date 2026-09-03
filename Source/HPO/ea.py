@@ -102,11 +102,16 @@ class EA(BaseEA):
 
         return
 
-    def load_data(self, task_id: int, data_dir: str, train_p: float) -> None:
+    def load_data_pd(self,
+                    data: pd.DataFrame,
+                    target_label: str,
+                    train_p: float,
+                    one_hot_cols: Optional[List[str]] = None,
+                    scalar_cols: Optional[List[str]] = None) -> None:
         """
         Loads data via parent class, then initializes param_space with correct binary_classification.
         """
-        super().load_data(task_id, data_dir, train_p)
+        super().load_data_pd(data, target_label, train_p, one_hot_cols, scalar_cols)
 
         # now binary_classification is set, create the param_space
         model_configs = {
@@ -240,7 +245,13 @@ class EA(BaseEA):
         """
         Evaluate a collection of individuals using Ray across 5-fold cross-validation.
         This method will update each individual's train and validation performance.
-        Uses the same CV split data structure as CASH EA via get_cv_splits() from BaseEA.
+        Uses the same per-fold CV data structure as CASH EA via get_cv_splits() from BaseEA.
+
+        One Ray task is launched per (individual, fold) pair so that every fold of every
+        pipeline is evaluated in parallel. Each fold's preprocessed data already lives in
+        the Ray object store (see BaseEA._prepare_cv_folds), so a task loads only the single
+        fold it needs. As results stream back, per-fold performances are tracked for each
+        pipeline and its mean CV performance is finalized as soon as all of its folds arrive.
 
         Args:
             candidates (List[Individual]): List of individuals to evaluate.
@@ -248,34 +259,47 @@ class EA(BaseEA):
         Returns:
             List[Individual]: The evaluated individuals with updated performance metrics.
         """
-        # get CV splits from base class (already preprocessed and in Ray object store)
+        # get per-fold CV data (each fold's arrays live in the Ray object store)
         cv_splits = self.get_cv_splits()
+        num_folds = len(cv_splits)
 
-        # Create one Ray task per individual (all 5 folds processed in single task)
+        # launch one Ray task per (individual, fold) so every fold evaluates in parallel
         ray_jobs = []
         for model_id, ind in enumerate(candidates):
-            ray_jobs.append(self.ray_train_func.remote(
-                cv_splits=cv_splits,
-                model_params=self.param_space.eval_parameters(ind.get_params()),
-                random_state=self.seed,
-                id=model_id,
-                binary_class=self.binary_classification,
-                labels=self.labels
-            ))
+            eval_params = self.param_space.eval_parameters(ind.get_params())
+            for X_train, y_train, X_validate, y_validate in cv_splits:
+                ray_jobs.append(self.ray_train_func.remote(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_validate=X_validate,
+                    y_validate=y_validate,
+                    model_params=eval_params,
+                    random_state=self.seed,
+                    id=model_id,
+                    binary_class=self.binary_classification,
+                    labels=self.labels
+                ))
 
-        # Gather results as they complete
-        pop_results = {}
+        # accumulate fold performances per pipeline (individual) as results arrive
+        pop_results = [{'train_acc': [], 'val_acc': []} for _ in candidates]
+
         while len(ray_jobs) > 0:
             finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
             for done_id in finished:
                 model_id, train_acc, val_acc, error = ray.get(done_id)
                 assert error > 0.0, f"Error during model training/evaluation for model_id {model_id}."
-                pop_results[model_id] = {'train_acc': train_acc, 'val_acc': val_acc}
 
-        # Assign performances to individuals
-        for i, ind in enumerate(candidates):
-            ind.set_train_performance(pop_results[i]['train_acc'])
-            ind.set_val_performance(pop_results[i]['val_acc'])
+                # track this fold's performance for the corresponding pipeline as it comes in
+                pop_results[model_id]['train_acc'].append(train_acc)
+                pop_results[model_id]['val_acc'].append(val_acc)
+
+                # once all folds for this pipeline are in, finalize its mean CV performance
+                if len(pop_results[model_id]['val_acc']) == num_folds:
+                    mean_train = float(np.mean(pop_results[model_id]['train_acc']))
+                    mean_val = float(np.mean(pop_results[model_id]['val_acc']))
+                    candidates[model_id].set_train_performance(mean_train)
+                    candidates[model_id].set_val_performance(mean_val)
+                    print(f"Pipeline {model_id} evaluated - Train AUC: {mean_train:.4f}, Val AUC: {mean_val:.4f}", flush=True)
 
         return candidates
 
