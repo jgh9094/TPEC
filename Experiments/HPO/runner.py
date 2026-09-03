@@ -2,12 +2,44 @@
 
 import sys
 import os
+import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../..')))
 
 import Source.HPO.ea as optimizer
 import argparse
 import ray
 
+def load_spine_opioid_data(data_path: str, y_label: str):
+
+    # load the dataset as a pandas dataframe
+    data_set = pd.read_csv(data_path)
+
+    # all possible y labels in the dataset
+    possible_y_labels = ['LOS_extended', 'discharge_Home', 'HOSP_READM_90']
+
+    # check if the provided y_label is valid
+    if y_label not in possible_y_labels:
+        raise ValueError(f"Invalid y_label '{y_label}'. Must be one of {possible_y_labels}.")
+
+    # drop all other y labels from the dataset
+    for label in possible_y_labels:
+        if label != y_label:
+            data_set = data_set.drop(columns=[label])
+
+    # cols needed to be one-hot encoded
+    one_hot_cols = []
+
+    # cols that need to be scalar transformed
+    scalar_cols = ['AGE','BMI','SBP','PAIN_SCORE','WBC_COUNT',
+                   'HEMOGLOBIN','POTASSIUM', 'SODIUM','PLATELET_COUNT',
+                   'RBC_COUNT','CALCIUM','CHLORIDE','BUN','CREATININE']
+
+    # make sure that all cols in scalar_cols exist in the dataset
+    for col in scalar_cols:
+        if col not in data_set.columns:
+            raise ValueError(f"Column '{col}' not found in the dataset.")
+
+    return data_set, one_hot_cols, scalar_cols
 
 def is_run_complete(output_directory: str) -> bool:
     """
@@ -22,10 +54,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run EA HPO")
     # random seed for reproducibility
     parser.add_argument('--seed', type=int, required=True, help='Random seed for reproducibility.')
-    # openml task id
-    parser.add_argument('--task_id', type=int, required=True, help='OpenML task ID to load dataset from.')
+    # task
+    parser.add_argument('--task', type=str, required=True, help='what dataset are we using.')
+    # y label
+    parser.add_argument('--y_label', type=str, required=True, help='Which y label to use for the dataset.')
     # data directory
-    parser.add_argument('--data_directory', type=str, required=True, help='Directory where datasets are stored.')
+    parser.add_argument('--data_path', type=str, required=True, help='Path to the data.')
     # train proportion
     parser.add_argument('--train_p', type=float, required=True, help='Proportion of dataset to use for training.')
     # output directory
@@ -68,8 +102,8 @@ if __name__ == "__main__":
     print("Experiment Configuration", flush=True)
     print("=" * 60, flush=True)
     print(f"Seed: {args.seed}")
-    print(f"Task ID: {args.task_id}", flush=True)
-    print(f"Data Directory: {args.data_directory}", flush=True)
+    print(f"Task: {args.task}", flush=True)
+    print(f"Data Path: {args.data_path}", flush=True)
     print(f"Train Proportion: {args.train_p}", flush=True)
     print(f"Output Directory: {args.output_directory}", flush=True)
     print(f"Model: {args.model}", flush=True)
@@ -89,7 +123,7 @@ if __name__ == "__main__":
 
     # initialize ray
     if not ray.is_initialized():
-        ray.init(num_cpus=args.cores, include_dashboard=False, ignore_reinit_error=True)
+        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True)
     print(f"Ray initialized with {args.cores} cores.", flush=True)
 
     # create EA
@@ -109,11 +143,20 @@ if __name__ == "__main__":
     )
     print(f"EA initalized", flush=True)
 
+    if args.task == 'so':
+        # load spine opioid data
+        data_set, one_hot_cols, scalar_cols = load_spine_opioid_data(data_path=args.data_path, y_label=args.y_label)
+        print(f"Spine Opioid data loaded", flush=True)
+    else:
+        raise ValueError(f"Unknown task '{args.task}'. Supported tasks: 'so' (spine opioid).")
+
     # load data
-    ea.load_data(
-        task_id=args.task_id,
-        data_dir=args.data_directory,
-        train_p=args.train_p
+    ea.load_data_pd(
+        data=data_set,
+        target_label=args.y_label,
+        train_p=args.train_p,
+        one_hot_cols=one_hot_cols,
+        scalar_cols=scalar_cols
     )
     print(f"EA data loaded", flush=True)
 
