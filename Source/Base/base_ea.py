@@ -16,7 +16,7 @@ from typeguard import typechecked
 from typing import List, Dict, Any, Optional, Tuple
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
@@ -240,6 +240,8 @@ class BaseEA(ABC):
             # mutate the hyperparameters based on the model type
             if model_type == 'rf':
                 mutated_params = model_param_space.RandomForestParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
+            elif model_type == 'et':
+                mutated_params = model_param_space.ExtraTreesParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
             elif model_type == 'ksvc':
                 mutated_params = model_param_space.KernelSVCParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
             elif model_type == 'gb':
@@ -259,7 +261,7 @@ class BaseEA(ABC):
         Evaluates a model on the test dataset after fitting on the full training set.
 
         Args:
-            model_type (str): The type of model to evaluate. Must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP'].
+            model_type (str): The type of model to evaluate. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'].
             model_params (Dict[str, Any]): Dictionary of hyperparameters for the model.
 
         Returns:
@@ -277,6 +279,9 @@ class BaseEA(ABC):
         if model_type == 'RF':
             eval_params = model_param_space.RandomForestParams().eval_parameters(model_params)
             model = RandomForestClassifier(**eval_params, random_state=self.seed, n_jobs=self.cores)
+        elif model_type == 'ET':
+            eval_params = model_param_space.ExtraTreesParams().eval_parameters(model_params)
+            model = ExtraTreesClassifier(**eval_params, random_state=self.seed, n_jobs=self.cores)
         elif model_type == 'KSVC':
             eval_params = model_param_space.KernelSVCParams().eval_parameters(model_params)
             model = SVC(**eval_params, random_state=self.seed, probability=True)
@@ -296,10 +301,11 @@ class BaseEA(ABC):
             model = MLPClassifier(hidden_layer_sizes=layers,
                                   activation=eval_params['activation'],
                                   solver=eval_params['solver'],
+                                  alpha=eval_params['alpha'],
                                   max_iter=eval_params['max_iter'],
                                   random_state=self.seed)
         else:
-            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP']")
+            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']")
 
         model.fit(X_train_preprocessed, self.y_train)
 

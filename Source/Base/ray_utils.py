@@ -1,7 +1,7 @@
 import ray
 import numpy as np
 from typing import Dict, Any, Tuple
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import roc_auc_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -226,6 +226,7 @@ def cv_mlp(
         model = MLPClassifier(hidden_layer_sizes=layers,
                               activation=model_params.get('activation'),
                               solver=model_params.get('solver'),
+                              alpha=model_params.get('alpha'),
                               max_iter=model_params.get('max_iter'),
                               random_state=random_state)
         model.fit(X_train, y_train)
@@ -241,4 +242,49 @@ def cv_mlp(
 
     except Exception as e:
         print(f"Error in cv_mlp: {e}")
+        return id, 0.0, 0.0, -1.0
+
+@ray.remote
+def cv_extra_trees(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
+    model_params: Dict[str, Any],
+    random_state: int,
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
+) -> Tuple[int, float, float, float]:
+    """
+    Train and evaluate an ExtraTreesClassifier (extremely randomized trees) using Ray.
+
+    Parameters:
+        X_train: Training features
+        y_train: Training labels
+        X_validate: Validation features
+        y_validate: Validation labels
+        model_params: Dictionary of hyperparameters for ExtraTreesClassifier
+        random_state: Random seed for reproducibility
+        id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Array of all possible class labels
+
+    Returns:
+        Tuple of (id, training_auc, validation_auc, error)
+        error: 1.0 if successful, -1.0 if error occurred
+    """
+    try:
+        model = ExtraTreesClassifier(**model_params, random_state=random_state)
+        model.fit(X_train, y_train)
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
+        return id, train_acc, val_acc, 1.0
+
+    except Exception as e:
+        print(f"Error in cv_extra_trees: {e}")
         return id, 0.0, 0.0, -1.0

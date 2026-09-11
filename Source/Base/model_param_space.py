@@ -13,6 +13,7 @@ class IntParam(TypedDict):
 class FloatParam(TypedDict):
     bounds: Tuple[float, float]
     type: Literal["float"]
+    log: bool  # if True, sample/optimize on a log scale (values must be strictly positive)
 
 class CatParam(TypedDict):
     bounds: Tuple[str | None, ...]
@@ -36,13 +37,6 @@ class ModelParams(ABC):
     def __init__(self, param_space: ParamSpace):
         self.param_space = param_space
 
-    def get_parameter_space(self) -> ParamSpace:
-        """
-        Returns the parameter space.
-        """
-        assert self.param_space is not None, "Parameter space is not defined."
-        return self.param_space
-
     @abstractmethod
     def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
         """
@@ -50,13 +44,6 @@ class ModelParams(ABC):
         Format {parameter_name: value}
         """
         pass
-
-    def get_param_type(self, key: str) -> str:
-        """
-        Returns the type of a given parameter.
-        """
-        assert key in self.param_space, f"Parameter '{key}' not found in parameter space."
-        return self.param_space[key]['type']
 
     def get_params_by_type(self, type: str) -> Dict:
         """
@@ -99,6 +86,20 @@ class ModelParams(ABC):
             return max
         else:
             return value
+
+    def sample_float_parameter(self, spec: FloatParam, rng: np.random.Generator) -> float:
+        """
+        Draws a random float within the spec's bounds.
+
+        When the spec is flagged ``log=True`` the value is sampled uniformly in log-space
+        (so small and large magnitudes are equally likely); otherwise it is sampled
+        uniformly on the linear scale. Log-scaled bounds must be strictly positive.
+        """
+        lo, hi = spec["bounds"]
+        if spec.get("log", False):
+            assert lo > 0.0 and hi > 0.0, "Log-scaled float bounds must be strictly positive."
+            return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
+        return float(rng.uniform(lo, hi))
 
     def pick_categorical_parameter(self, choices: List | Tuple, rng: np.random.Generator):
         """
@@ -167,8 +168,8 @@ class RandomForestParams(ModelParams):
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
-            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
         })
 
@@ -187,7 +188,7 @@ class RandomForestParams(ModelParams):
             if spec["type"] == "int":
                 rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
             elif spec["type"] == "float":
-                rand_genotype[param_name] = float(rng.uniform(*spec["bounds"]))
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
             elif spec["type"] == "cat":
                 rand_genotype[param_name] = rng.choice(spec["bounds"])
             else:
@@ -244,27 +245,11 @@ class RandomForestParams(ModelParams):
         Returns:
             Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
         """
-        # If 'bootstrap' is True, 'max_samples' must have a numeric value within bounds
-        # if model_params['bootstrap'] is True:
-        #     bounds = self.param_space['max_samples']['bounds']
-        #     assert(model_params['max_samples'] is not None
-        #            and bounds[0] <= model_params['max_samples'] <= bounds[1])
-
-        # # If 'bootstrap' is False, 'max_samples' must be None
-        # if model_params['bootstrap'] is False:
-        #     assert(model_params['max_samples'] is None)
-
         model_params_copy = copy.deepcopy(model_params)
-
-        # if model_params_copy['max_samples'] is None:
-        #     # if bootstrap is False, set max_samples to 1.0 (100% of data being used)
-        #     model_params_copy['max_samples'] = 1.0
-
         return model_params_copy
 
     def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
         """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        # make sure if 'bootstrap' is True, 'max_samples' must have a numeric value within bounds
         return {'n_estimators': model_params['n_estimators'],
                 'criterion': model_params['criterion'],
                 'max_depth': model_params['max_depth'],
@@ -279,11 +264,106 @@ class RandomForestParams(ModelParams):
         return "RF"
 
 @typechecked
+class ExtraTreesParams(ModelParams):
+    """
+    Parameter space for scikit-learn's ExtraTreesClassifier (extremely randomized trees).
+
+    Mirrors RandomForestParams but intentionally omits ``max_samples``: ExtraTrees is used
+    with its default ``bootstrap=False`` (the whole sample is drawn for every tree and split
+    thresholds are chosen at random), which is what distinguishes it from Random Forest and
+    is the source of its additional stochasticity. ``max_samples`` only applies when
+    ``bootstrap=True`` in scikit-learn, so it is not part of this space.
+    """
+    def __init__(self, offset: float = 1.0e-4):
+        super().__init__(param_space={
+            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
+            'max_depth': IntParam(bounds=(1, 30), type='int'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
+        })
+
+    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
+        """
+        Generates a random set of parameter values based on the defined parameter space.
+        Should be ready for hard evaluation.
+
+        Parameters:
+            rng (np.random.Generator): A NumPy random generator instance.
+        Returns:
+            Dict[str, Any]: A dictionary of randomly generated parameters.
+        """
+        rand_genotype = {}
+        for param_name, spec in self.param_space.items():
+            if spec["type"] == "int":
+                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
+            elif spec["type"] == "float":
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
+            elif spec["type"] == "cat":
+                rand_genotype[param_name] = rng.choice(spec["bounds"])
+            else:
+                raise ValueError(f"Unsupported parameter type: {spec['type']}")
+        # Fix the parameters to ensure they are valid
+        self.variation_fix_parameters(rand_genotype, rng)
+        return rand_genotype
+
+    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
+        """
+        Mutates the model parameters (genotype) in-place with a given mutation rate.
+        Should be ready for hard evaluation.
+
+        Parameters:
+            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
+            mut_rate (float): Probability of mutating each parameter.
+            rng (np.random.Generator): A NumPy random generator instance.
+        """
+        # Per-gene mutation
+        for name, spec in self.param_space.items():
+            # Coin flip to decide whether to mutate each parameter
+            if rng.uniform() < mut_rate:
+                if spec["type"] == "int":
+                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
+                elif spec["type"] == "float":
+                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
+                elif spec["type"] == "cat":
+                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
+                else:
+                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
+
+        # Fix parameters in case of mutation errors
+        self.variation_fix_parameters(model_params, rng)
+        return model_params
+
+    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
+        """ ExtraTrees requires no post-variation fixes. """
+        return
+
+    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
+        """ Returns a deep copy of 'model_params' adjusted for the TPE optimizer. """
+        return copy.deepcopy(model_params)
+
+    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
+        """ Fixes a set of parameters for hard evaluation with scikit-learn. """
+        return {'n_estimators': model_params['n_estimators'],
+                'criterion': model_params['criterion'],
+                'max_depth': model_params['max_depth'],
+                'max_features': model_params['max_features'],
+                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None}
+
+    def get_model_type(self) -> str:
+        """
+        Returns the model type as a string.
+        """
+        return "ET"
+
+@typechecked
 class KernelSVCParams(ModelParams):
     def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
-            'C': FloatParam(bounds=(0.0 + offset, 1e2), type='float'),
+            'C': FloatParam(bounds=(1e-3, 1e2), type='float', log=True),
             'kernel': CatParam(bounds=('linear', 'poly', 'rbf', 'sigmoid'), type='cat'),
+            'gamma': FloatParam(bounds=(1e-4, 1e1), type='float', log=True),
+            'degree': IntParam(bounds=(2, 5), type='int'),
             'max_iter': IntParam(bounds=(10000, 100000), type='int'),
             'class_weight': CatParam(bounds=('None', 'balanced'), type='cat'),
             'decision_function_shape': CatParam(bounds=('ovo', 'ovr'), type='cat')
@@ -304,7 +384,7 @@ class KernelSVCParams(ModelParams):
             if spec["type"] == "int":
                 rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
             elif spec["type"] == "float":
-                rand_genotype[param_name] = float(rng.uniform(*spec["bounds"]))
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
             elif spec["type"] == "cat":
                 rand_genotype[param_name] = rng.choice(spec["bounds"])
             else:
@@ -367,6 +447,8 @@ class KernelSVCParams(ModelParams):
         """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
         return {'C': model_params['C'],
                 'kernel': model_params['kernel'],
+                'gamma': model_params['gamma'],
+                'degree': model_params['degree'],
                 'max_iter': model_params['max_iter'],
                 'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None,
                 'decision_function_shape': model_params['decision_function_shape']}
@@ -382,12 +464,12 @@ class GradientBoostParams(ModelParams):
     def __init__(self, binary_class: bool, offset: float = 1.0e-4):
         super().__init__(param_space = {
             'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat') if binary_class else CatParam(bounds=('log_loss',), type='cat'),
-            'learning_rate': FloatParam(bounds=(0.0 + offset, 0.5), type='float'),
+            'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float'),
+            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float')
+            'max_depth': IntParam(bounds=(1, 8), type='int'),
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
     def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
@@ -405,7 +487,7 @@ class GradientBoostParams(ModelParams):
             if spec["type"] == "int":
                 rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
             elif spec["type"] == "float":
-                rand_genotype[param_name] = float(rng.uniform(*spec["bounds"]))
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
             elif spec["type"] == "cat":
                 rand_genotype[param_name] = rng.choice(spec["bounds"])
             else:
@@ -485,10 +567,10 @@ class GradientBoostParams(ModelParams):
 class KNeighborsClassifierParams(ModelParams):
     def __init__(self, offset: float = 1.0e-4):
         super().__init__(param_space = {
-            'n_neighbors': IntParam(bounds=(1, 100), type='int'),
+            'n_neighbors': IntParam(bounds=(1, 300), type='int'),
             'weights': CatParam(bounds=('uniform', 'distance'), type='cat'),
             'algorithm': CatParam(bounds=('ball_tree', 'kd_tree', 'brute'), type='cat'),
-            'leaf_size': IntParam(bounds=(1, 50), type='int'),
+            'leaf_size': IntParam(bounds=(1, 100), type='int'),
             'p': IntParam(bounds=(1, 5), type='int')
         })
 
@@ -506,6 +588,8 @@ class KNeighborsClassifierParams(ModelParams):
         for param_name, spec in self.param_space.items():
             if spec["type"] == "int":
                 rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
+            elif spec["type"] == "float":
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
             elif spec["type"] == "cat":
                 rand_genotype[param_name] = rng.choice(spec["bounds"])
             else:
@@ -530,6 +614,8 @@ class KNeighborsClassifierParams(ModelParams):
             if rng.uniform() < mut_rate:
                 if spec["type"] == "int":
                     model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
+                elif spec["type"] == "float":
+                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
                 elif spec["type"] == "cat":
                     model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
                 else:
@@ -588,6 +674,7 @@ class MLPClassifierParams(ModelParams):
             'layer_5': IntParam(bounds=(10, 100), type='int'),
             'activation': CatParam(bounds=('identity', 'logistic', 'tanh', 'relu'), type='cat'),
             'solver': CatParam(bounds=('lbfgs', 'sgd', 'adam'), type='cat'),
+            'alpha': FloatParam(bounds=(1e-6, 1e-1), type='float', log=True),
             'max_iter': IntParam(bounds=(10000, 100000), type='int')
         })
 
@@ -605,6 +692,8 @@ class MLPClassifierParams(ModelParams):
         for param_name, spec in self.param_space.items():
             if spec["type"] == "int":
                 rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
+            elif spec["type"] == "float":
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
             elif spec["type"] == "cat":
                 rand_genotype[param_name] = rng.choice(spec["bounds"])
             else:
@@ -629,6 +718,8 @@ class MLPClassifierParams(ModelParams):
             if rng.uniform() < mut_rate:
                 if spec["type"] == "int":
                     model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
+                elif spec["type"] == "float":
+                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
                 elif spec["type"] == "cat":
                     model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
                 else:
@@ -671,6 +762,7 @@ class MLPClassifierParams(ModelParams):
                 'layer_5': model_params['layer_5'],
                 'activation': model_params['activation'],
                 'solver': model_params['solver'],
+                'alpha': model_params['alpha'],
                 'max_iter': model_params['max_iter']}
 
     def get_model_type(self) -> str:
