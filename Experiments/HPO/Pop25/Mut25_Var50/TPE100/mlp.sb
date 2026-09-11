@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --time=05:00:00
+#SBATCH --mem=200G
+#SBATCH --job-name=P25_M2550_1h_mlp
+#SBATCH -p defq,moore,preemptable
+#SBATCH --array=1-63
+
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+# standard parameters used for all experiments
+TRAIN_P=0.70
+MODEL=MLP
+GENS=19
+POP_SIZE=25
+CORES=$SLURM_CPUS_PER_TASK
+MUT_PROB=0.25
+MUT_VAR=0.50
+TPE_PROB=1.0
+TOURNAMENT_SIZE=2
+NUM_OFFSPRING=20
+GAMMA=0.3
+TPE_MUT_SCALE=0.50
+EXPLORE_MUT_SCALE=2.0
+DATA_DIRECTORY=/home/hernandezj45/Repos/TPEC/Data/SO/combined.csv
+# variables that are set by the SLURM job array
+# Array of all task IDs from tasks_summary.csv (3 tasks x 21 replicates = 63 jobs)
+TASK_IDS=(LOS_extended discharge_Home HOSP_READM_90)
+
+# Calculate which task and seed based on SLURM_ARRAY_TASK_ID (1-63)
+# Each task gets 21 replicates (seeds 0-20)
+TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 21 ))
+SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
+# specific task id for the OpenML dataset to be used in this experiment
+TASK_ID=${TASK_IDS[$TASK_INDEX]}
+# Output directory for this specific task and seed
+OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/Results/Pop25/Mut25_Var50/TPE100/${MODEL}/Task_${TASK_ID}/Seed_${SEED}/
+
+python /home/hernandezj45/Repos/TPEC/Experiments/HPO/runner.py \
+    --seed $SEED \
+    --y_label $TASK_ID \
+    --data_path $DATA_DIRECTORY \
+    --train_p $TRAIN_P \
+    --output_directory $OUTPUT_DIRECTORY \
+    --model $MODEL \
+    --gens $GENS \
+    --pop_size $POP_SIZE \
+    --cores $CORES \
+    --mut_prob $MUT_PROB \
+    --mut_var $MUT_VAR \
+    --tpe_prob $TPE_PROB \
+    --tournament_size $TOURNAMENT_SIZE \
+    --num_offspring $NUM_OFFSPRING \
+    --gamma $GAMMA \
+    --tpe_mut_scale $TPE_MUT_SCALE \
+    --explore_mut_scale $EXPLORE_MUT_SCALE \
+    --task so

@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # output directory
     parser.add_argument('--output_directory', type=str, required=True, help='Directory for output files.')
     # model type
-    parser.add_argument('--model', type=str, required=True, choices=['RF', 'KSVC', 'GB', 'KNN', 'MLP'], help='Model type to optimize.')
+    parser.add_argument('--model', type=str, required=True, choices=['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'], help='Model type to optimize.')
     # number of generations
     parser.add_argument('--gens', type=int, required=True, help='Number of generations.')
     # population size
@@ -160,8 +160,8 @@ if __name__ == "__main__":
     )
     print(f"EA data loaded", flush=True)
 
-    # run evolution
-    ea.evolve(gens=args.gens)
+    # run evolution (checkpoint best-so-far test performance each generation)
+    ea.evolve(gens=args.gens, checkpoint_dir=args.output_directory)
 
     # save results
     ea.save_results(save_dir=args.output_directory)
