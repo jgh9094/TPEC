@@ -7,7 +7,23 @@ from itertools import combinations
 import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from Source.Base.eval_utils import MODEL_CONFIG
+from Source.Base.model_param_space import (
+    RandomForestParams, ExtraTreesParams, KernelSVCParams, GradientBoostParams,
+    KNeighborsClassifierParams, MLPClassifierParams
+)
+
+# Map each HPO model-type identifier to a zero-arg factory for its parameter-space class.
+# These mirror the models supported by Source/HPO/ea.py. GradientBoost needs binary_class
+# only to pick the 'loss' categories; the parameter *types* (all diversity relies on) are
+# identical either way, so binary_class=True is used unconditionally here.
+MODEL_PARAM_CLASSES = {
+    'RF': RandomForestParams,
+    'ET': ExtraTreesParams,
+    'KSVC': KernelSVCParams,
+    'GB': lambda: GradientBoostParams(binary_class=True),
+    'KNN': KNeighborsClassifierParams,
+    'MLP': MLPClassifierParams,
+}
 
 def normalize_hyperparameters(df: pd.DataFrame, param_space: dict) -> tuple:
     """
@@ -19,7 +35,7 @@ def normalize_hyperparameters(df: pd.DataFrame, param_space: dict) -> tuple:
     df : pd.DataFrame
         DataFrame containing hyperparameter values
     param_space : dict
-        Parameter space dictionary from MODEL_CONFIG
+        Parameter space dictionary (a ModelParams instance's ``param_space``)
 
     Returns:
     --------
@@ -121,7 +137,7 @@ def compute_diversity_metric(csv_path: str, model_type: str) -> float:
     csv_path : str
         Path to the archive CSV file
     model_type : str
-        Model type identifier (e.g., 'RF', 'DT', etc.)
+        Model type identifier (e.g., 'RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP')
 
     Returns:
     --------
@@ -140,11 +156,10 @@ def compute_diversity_metric(csv_path: str, model_type: str) -> float:
         return 0.0
 
     # Get parameter space for the model
-    if model_type not in MODEL_CONFIG:
-        raise ValueError(f"Unknown model type: {model_type}. Valid options: {list(MODEL_CONFIG.keys())}")
+    if model_type not in MODEL_PARAM_CLASSES:
+        raise ValueError(f"Unknown model type: {model_type}. Valid options: {list(MODEL_PARAM_CLASSES.keys())}")
 
-    param_class = MODEL_CONFIG[model_type]['param_class']
-    param_space = param_class.get_parameter_space()
+    param_space = MODEL_PARAM_CLASSES[model_type]().param_space
 
     # Normalize hyperparameters
     df_normalized, numerical_cols, categorical_cols = normalize_hyperparameters(df, param_space)
@@ -161,8 +176,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute diversity metric for hyperparameter archive")
 
     parser.add_argument('--model_type', type=str, required=True,
-                        choices=['RF', 'DT', 'KSVC', 'LSVC', 'LSGD', 'ET', 'GB'],
-                        help='Type of model (must match MODEL_CONFIG keys)')
+                        choices=['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'],
+                        help='Type of model (must match MODEL_PARAM_CLASSES keys)')
 
     parser.add_argument('--csv_path', type=str, required=True,
                         help='Path to the archive CSV file')

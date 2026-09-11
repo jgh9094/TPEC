@@ -21,11 +21,11 @@ from Source.Base.individual import Individual
 from Source.Base.tpe import TPE
 
 from Source.Base.model_param_space import (
-    RandomForestParams, KernelSVCParams, GradientBoostParams,
+    RandomForestParams, ExtraTreesParams, KernelSVCParams, GradientBoostParams,
     KNeighborsClassifierParams, MLPClassifierParams
 )
 from Source.Base.ray_utils import (
-    cv_random_forest, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp
+    cv_random_forest, cv_extra_trees, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp
 )
 
 
@@ -42,7 +42,7 @@ class EA(BaseEA):
                  cores: int,
                  mut_prob: float,
                  mut_var: float,
-                 model: str,  # must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP']
+                 model: str,  # must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']
                  tpe_prob: float,
                  tournament_size: int,
                  num_offspring: int,
@@ -53,7 +53,7 @@ class EA(BaseEA):
         Initializes the HPO EA class with the provided parameters.
 
         Args:
-            model (str): The type of model to optimize. Must be one of ['RF', 'KSVC', 'GB', 'KNN', 'MLP'].
+            model (str): The type of model to optimize. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'].
             tpe_prob (float): Probability of using TPE-based selection.
             seed (int): Random seed for reproducibility.
             gens (int): Number of generations to evolve.
@@ -76,7 +76,7 @@ class EA(BaseEA):
         )
 
         # store model type for deferred param_space creation (after load_data sets binary_classification)
-        valid_models = ['RF', 'KSVC', 'GB', 'KNN', 'MLP']
+        valid_models = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']
         if model not in valid_models:
             raise ValueError(f"Unknown model type: {model}. Must be one of {valid_models}")
         self.model = model
@@ -100,6 +100,10 @@ class EA(BaseEA):
         self.best_perf = float("-inf")
         self.best_ind: Optional[Individual] = None
 
+        # per-generation checkpoints: test-set performance of the best-so-far individual,
+        # recorded across generations for diagnostic tracking (not used by the final result)
+        self.checkpoints: List[dict] = []
+
         return
 
     def load_data_pd(self,
@@ -116,6 +120,7 @@ class EA(BaseEA):
         # now binary_classification is set, create the param_space
         model_configs = {
             'RF': (RandomForestParams(), cv_random_forest),
+            'ET': (ExtraTreesParams(), cv_extra_trees),
             'KSVC': (KernelSVCParams(), cv_kernel_svc),
             'GB': (GradientBoostParams(binary_class=self.binary_classification), cv_gradient_boost),
             'KNN': (KNeighborsClassifierParams(), cv_knn),
@@ -123,7 +128,8 @@ class EA(BaseEA):
         }
         self.param_space, self.ray_train_func = model_configs[self.model]
 
-    def evolve(self, gens: int, ucb: bool = False, pi: bool = False, ei: bool = False) -> None:
+    def evolve(self, gens: int, ucb: bool = False, pi: bool = False, ei: bool = False,
+               checkpoint_dir: Optional[str] = None) -> None:
         """
         Run the EA with parallelized fitness evaluations using Ray.
 
@@ -132,6 +138,11 @@ class EA(BaseEA):
             ucb (bool): Not used in HPO EA (included for interface compatibility).
             pi (bool): Not used in HPO EA (included for interface compatibility).
             ei (bool): Not used in HPO EA (included for interface compatibility).
+            checkpoint_dir (Optional[str]): If provided, after every generation (starting with
+                the initial population, logged as Gen -1) the best-so-far individual is evaluated
+                on the test set and a row is appended to ``{checkpoint_dir}/checkpoints.csv``.
+                This is a diagnostic aid for watching how held-out performance evolves; it does
+                not affect the final result.
         """
 
         start_time = time.time()
@@ -152,6 +163,10 @@ class EA(BaseEA):
         self.update_best_seen(self.population)
         print(f"Best performance so far (Gen 0): {self.best_perf}", flush=True)
 
+        # checkpoint the best-so-far individual's test performance for the initial
+        # population (Gen -1, since evolution proper begins at Gen 0)
+        self.checkpoint_best_seen(generation=-1, checkpoint_dir=checkpoint_dir)
+
         # Start evolution
         for g in range(gens):
             # Parent selection with tournament selection
@@ -171,22 +186,22 @@ class EA(BaseEA):
             self.update_best_seen(self.population)
             print(f"Best performance so far (Gen {g+1}): {self.best_perf}", flush=True)
 
+            # checkpoint the best-so-far individual's test performance for this generation
+            self.checkpoint_best_seen(generation=g, checkpoint_dir=checkpoint_dir)
+
         # make sure that the archive is the correct size
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
         print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
 
-        # find all best performers in the archive, and randomly select one for final test evaluation
-        tol = 1e-12
-        best_performers = [
-            pos for pos, ind in enumerate(self.archive)
-            if abs(ind.get_val_performance() - self.best_perf) <= tol
-        ]
-
-        if len(best_performers) > 0:
-            best_individual = cp.deepcopy(self.archive[self.rng.choice(best_performers)])
-        else:
-            assert self.best_ind is not None, "No stored global best individual."
-            best_individual = cp.deepcopy(self.best_ind)
+        # use the best-so-far individual (first config to reach the best validation AUC) for the
+        # final test evaluation. Among validation ties this is a deterministic choice; it must not
+        # be broken using test performance (that would leak the test set), and first-found does not.
+        # This also keeps the final reported result identical to the last checkpoint.
+        assert self.best_ind is not None, "No stored global best individual."
+        # rebuild from params so the train/test performance setters start clean (best_ind already
+        # carries the CV train/val performance from evaluation)
+        best_individual = Individual(self.best_ind.get_params(), self.best_ind.model_type)
+        best_individual.set_val_performance(self.best_perf)
 
         # evaluate best individual on test set
         train_score, test_score = self.model_test_evaluation(
@@ -398,11 +413,81 @@ class EA(BaseEA):
                 self.best_perf = perf
                 self.best_ind = cp.deepcopy(ind)
 
+    def checkpoint_best_seen(self, generation: int, checkpoint_dir: Optional[str]) -> None:
+        """
+        Record the test-set performance of the best-so-far individual for one generation.
+
+        This is a diagnostic aid: it lets us watch how the held-out (test) performance of the
+        best-validation individual evolves generation by generation. The tracked individual is
+        ``self.best_ind`` (the first individual to reach the current best validation AUC), which
+        is the same individual ``evolve`` reports at the end, so the final generation's checkpoint
+        matches the final saved result.
+
+        To avoid redundant full-model refits, the best individual is only re-evaluated on the
+        test set when its validation performance improved since the previous checkpoint;
+        otherwise the previous generation's train/test scores are carried forward (correct,
+        since the best-so-far only changes when validation performance strictly improves).
+
+        Args:
+            generation (int): Generation index (-1 for the initial population; evolution
+                proper starts at 0).
+            checkpoint_dir (Optional[str]): Directory to write ``checkpoints.csv`` into.
+                If None, checkpointing is disabled and this is a no-op.
+        """
+        if checkpoint_dir is None:
+            return
+
+        assert self.best_ind is not None, "No best individual to checkpoint."
+
+        # only refit/evaluate on the test set when the best-so-far actually changed
+        if self.checkpoints and self.checkpoints[-1]["val_auc"] == self.best_perf:
+            train_score = self.checkpoints[-1]["train_auc"]
+            test_score = self.checkpoints[-1]["test_auc"]
+        else:
+            train_score, test_score = self.model_test_evaluation(
+                model_type=self.param_space.get_model_type().upper(),
+                model_params=self.best_ind.get_params()
+            )
+
+        self.checkpoints.append({
+            "generation": generation,
+            "hard_evals": self.hard_eval_count,
+            "val_auc": float(self.best_perf),
+            "train_auc": float(train_score),
+            "test_auc": float(test_score),
+        })
+
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        csv_path = os.path.join(checkpoint_dir, "checkpoints.csv")
+        pd.DataFrame(self.checkpoints).to_csv(csv_path, index=False)
+
+        # snapshot of the best-so-far result at this many total hard evaluations, mirroring
+        # the best_results.json schema so progress can be tracked generation by generation
+        result_snapshot = {
+            "generation": generation,
+            "hard_evals": self.hard_eval_count,
+            "task_id": self.task_id,
+            "model_type": self.param_space.get_model_type(),
+            "seed": self.seed,
+            "train_accuracy": float(train_score),
+            "validation_accuracy": float(self.best_perf),
+            "test_accuracy": float(test_score),
+            "best_params": self.best_ind.get_params(),
+        }
+        json_path = os.path.join(checkpoint_dir, f"results_eval_{self.hard_eval_count}.json")
+        with open(json_path, 'w') as f:
+            json.dump(result_snapshot, f, indent=4)
+
+        print(f"Checkpoint (Gen {generation}) - Val AUC: {self.best_perf:.4f}, "
+              f"Train AUC: {train_score:.4f}, Test AUC: {test_score:.4f} "
+              f"-> {json_path}", flush=True)
+
+        return
+
     def save_results(self, save_dir: str) -> None:
         """
         Save final results using the best individual evaluated at the end of evolve().
         The JSON will contain train, validation, and test accuracy as well as the hyperparameter settings.
-        Save the entire archive to output directory as well as a csv file with headers reflecting the model parameters type.
         """
         assert self.best_ind is not None, "No best individual found. Run evolve() first."
 
@@ -428,18 +513,5 @@ class EA(BaseEA):
         with open(json_path, 'w') as f:
             json.dump(best_results, f, indent=4)
         print(f"Best results saved to: {json_path}", flush=True)
-
-        # Save entire archive as CSV with only hyperparameters
-        archive_data = []
-        for ind in self.tpe_archive:
-            # Only store hyperparameters, convert None to 'None' string
-            params = ind.get_params()
-            params_cleaned = {k: ('None' if v is None else v) for k, v in params.items()}
-            archive_data.append(params_cleaned)
-
-        archive_df = pd.DataFrame(archive_data)
-        csv_path = os.path.join(task_output_dir, "archive.csv")
-        archive_df.to_csv(csv_path, index=False)
-        print(f"Archive saved to: {csv_path}", flush=True)
 
         return
