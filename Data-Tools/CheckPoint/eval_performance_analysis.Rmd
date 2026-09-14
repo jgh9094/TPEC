@@ -1,0 +1,279 @@
+---
+title: "Performance Analysis at a Fixed Evaluation Budget"
+output:
+  bookdown::pdf_book:
+    toc: false
+documentclass: article
+description: "Checkpoint fixed-budget performance supplementary material"
+geometry: margin=1.5cm
+params:
+  model: "RF"
+  evals: 500
+header-includes:
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 6,
+  out.width = "100%",
+  fig.align = 'center')
+```
+
+```{r load-libraries, include=FALSE}
+library(dplyr)
+library(knitr)
+library(tidyr)
+library(kableExtra)
+library(ggplot2)
+```
+
+```{r config, include=FALSE}
+# The single model this report covers (override via render params::model).
+MODEL <- params$model
+
+# Hard-evaluation budget the strategies are compared at (override via
+# render params::evals). Only checkpoints landing exactly on this many
+# accumulated hard evaluations are used, so the value must sit on the run's
+# checkpoint grid: Pop 25 checkpoints every 25 evals (25, 50, ..., 500) and
+# Pop 50 every 50 (50, 100, ..., 500).
+EVALS <- params$evals
+
+# Performance metric analysed throughout this report.
+METRIC <- "test_auc"
+METRIC_LABEL <- "Test AUC"
+
+# Search strategies, in exploration -> exploitation display order.
+STRATEGY <- c("EA_Explore", "TPE25", "TPE50", "TPE75", "TPE100", "EA_Exploit")
+
+# Colour-blind-friendly (Okabe-Ito) palette, one colour per strategy.
+cb_palette <- setNames(
+  c("#0072B2", "#56B4E9", "#009E73", "#E69F00", "#D55E00", "#CC79A7"),
+  STRATEGY)
+
+# Fillable point shapes (21-25 accept a fill), one per strategy.
+SHAPE <- setNames(c(21, 22, 23, 24, 25, 21), STRATEGY)
+```
+
+```{r flat-violin, include=FALSE}
+# Self-contained half ("flat") violin geom used for the raincloud plots below.
+# Depends only on ggplot2 so the report knits without extra packages.
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+GeomFlatViolin <- ggproto("GeomFlatViolin", Geom,
+  setup_data = function(data, params) {
+    data$width <- data$width %||% params$width %||%
+      (resolution(data$x, FALSE) * 0.9)
+    data$ymin <- ave(data$y, data$group, FUN = min)
+    data$ymax <- ave(data$y, data$group, FUN = max)
+    data$xmin <- data$x
+    data$xmax <- data$x + data$width / 2
+    data
+  },
+  draw_group = function(data, panel_scales, coord) {
+    data <- transform(data, xminv = x, xmaxv = x + violinwidth * (xmax - x))
+    ord <- order(data$y)
+    newdata <- rbind(
+      transform(data, x = xminv)[ord, ],
+      transform(data, x = xmaxv)[rev(ord), ])
+    newdata <- rbind(newdata, newdata[1, ])
+    GeomPolygon$draw_panel(newdata, panel_scales, coord)
+  },
+  draw_key = draw_key_polygon,
+  default_aes = aes(weight = 1, colour = "grey20", fill = "white", size = 0.5,
+                    alpha = NA, linetype = "solid"),
+  required_aes = c("x", "y"))
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(data = data, mapping = mapping, stat = stat, geom = GeomFlatViolin,
+        position = position, show.legend = show.legend,
+        inherit.aes = inherit.aes,
+        params = list(trim = trim, scale = scale, ...))
+}
+```
+
+```{r theme-setup, include=FALSE}
+p_theme <- theme(
+  plot.title = element_text(face = "bold", hjust = 0.5),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.title = element_text(size = 13),
+  axis.text = element_text(size = 10),
+  strip.text = element_text(size = 11, face = "bold"),
+  axis.title.y = element_blank(),
+  legend.position = "none",
+  panel.background = element_rect(fill = "#f1f2f5",
+                                  colour = "white",
+                                  size = 0.5, linetype = "solid")
+)
+
+# Raincloud plot of the fixed-budget metric by strategy, faceted by population
+# size (rows) and mutation/variance (columns).
+plot_performance <- function(data, title = NULL) {
+  ggplot(data, aes(x = strategy, y = .data[[METRIC]],
+                   color = strategy, fill = strategy, shape = strategy)) +
+    geom_flat_violin(position = position_nudge(x = .1, y = 0),
+                     scale = 'width', alpha = 0.2, width = 1.5) +
+    geom_boxplot(color = 'black', width = .1, outlier.shape = NA,
+                 alpha = 0.0, size = 0.6,
+                 position = position_nudge(x = .16, y = 0)) +
+    geom_point(position = position_jitter(width = 0.03, height = 0.0),
+               size = 0.9, alpha = 0.8) +
+    scale_y_continuous(name = METRIC_LABEL) +
+    scale_x_discrete(name = "Strategy") +
+    scale_shape_manual(values = SHAPE, limits = STRATEGY) +
+    scale_colour_manual(values = cb_palette, limits = STRATEGY) +
+    scale_fill_manual(values = cb_palette, limits = STRATEGY) +
+    facet_grid(pop_label ~ mutvar_label) +
+    ggtitle(title) +
+    p_theme + coord_flip()
+}
+```
+
+```{r helper-functions, include=FALSE}
+# Five-number summary (min, Q1, median, Q3, max) of the metric per strategy,
+# within one population-size / mutation-variance cell.
+summarise_metric <- function(data, caption = NULL, label = NULL) {
+  data %>%
+    group_by(pop_label, mutvar_label, strategy) %>%
+    summarise(
+      min = min(.data[[METRIC]], na.rm = TRUE),
+      Q1 = quantile(.data[[METRIC]], 0.25, na.rm = TRUE),
+      median = median(.data[[METRIC]], na.rm = TRUE),
+      Q3 = quantile(.data[[METRIC]], 0.75, na.rm = TRUE),
+      max = max(.data[[METRIC]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    knitr::kable(format = "latex", booktabs = TRUE, digits = 4, longtable = TRUE,
+                 col.names = c("Pop", "Mut/Var", "Strategy",
+                               "Min", "Q1", "Median", "Q3", "Max"),
+                 format.args = list(scientific = FALSE),
+                 caption = caption, label = label) %>%
+    kableExtra::kable_styling(latex_options = c("HOLD_position", "repeat_header"))
+}
+
+# Friedman test of the metric across strategies, blocking on seed, run
+# independently within each population-size / mutation-variance cell. The test
+# needs a complete block design, so seeds missing under any strategy in a cell
+# are dropped; the number of complete blocks used is reported per cell.
+friedman_table <- function(data, caption = NULL, label = NULL) {
+  cells <- data %>% distinct(pop_label, mutvar_label)
+
+  rows <- lapply(seq_len(nrow(cells)), function(i) {
+    cell <- data %>%
+      filter(pop_label == cells$pop_label[i],
+             mutvar_label == cells$mutvar_label[i])
+
+    wide <- cell %>%
+      select(seed, strategy, dplyr::all_of(METRIC)) %>%
+      tidyr::pivot_wider(names_from = strategy,
+                         values_from = dplyr::all_of(METRIC))
+
+    present <- intersect(STRATEGY, colnames(wide))
+    mat <- as.matrix(wide[, present, drop = FALSE])
+    mat <- mat[stats::complete.cases(mat), , drop = FALSE]
+
+    # Friedman needs >= 2 strategies and >= 2 complete blocks.
+    if (length(present) < 2 || nrow(mat) < 2) {
+      return(data.frame(Pop = cells$pop_label[i],
+                        MutVar = cells$mutvar_label[i],
+                        Statistic = NA_real_, df = NA_integer_,
+                        p.value = "NA", n_blocks = nrow(mat)))
+    }
+
+    res <- friedman.test(mat)
+    p_value <- if (res$p.value < 1e-4) "$< 0.0001$" else
+      formatC(res$p.value, format = "f", digits = 4)
+
+    data.frame(Pop = cells$pop_label[i], MutVar = cells$mutvar_label[i],
+               Statistic = round(unname(res$statistic), 3),
+               df = unname(res$parameter), p.value = p_value,
+               n_blocks = nrow(mat))
+  })
+
+  do.call(rbind, rows) %>%
+    knitr::kable(format = "latex", booktabs = TRUE, digits = 4, longtable = TRUE,
+                 col.names = c("Pop", "Mut/Var", "Friedman $\\chi^2$", "df",
+                               "p-value", "Seeds (blocks)"),
+                 escape = FALSE,
+                 format.args = list(scientific = FALSE),
+                 caption = caption, label = label) %>%
+    kableExtra::kable_styling(latex_options = c("HOLD_position", "repeat_header"))
+}
+```
+
+```{r load-data, include=FALSE}
+data <- read.csv("checkpoint_trajectories.csv", header = TRUE,
+                 stringsAsFactors = FALSE)
+
+# Keep only this model's checkpoint at the requested budget: one row per run.
+data <- data %>% filter(model == MODEL, hard_evals == EVALS)
+
+if (nrow(data) == 0)
+  stop(sprintf(
+    "No %s checkpoints at hard_evals == %d. Pick a value on the checkpoint grid (Pop 25: 25, 50, ..., 500; Pop 50: 50, 100, ..., 500).",
+    MODEL, EVALS))
+
+data$strategy <- factor(data$strategy, levels = STRATEGY)
+data$pop_label <- factor(sprintf("Pop %d", data$pop),
+                         levels = sprintf("Pop %d", sort(unique(data$pop))))
+data$mutvar_label <- factor(
+  sprintf("mut=%.2f, var=%.2f", data$mut_rate, data$variance))
+```
+
+# Methodology
+
+For model **`r MODEL`** we report the distribution of the **`r METRIC_LABEL`** of
+the best-so-far individual after **`r EVALS`** accumulated hard evaluations,
+across the `r length(STRATEGY)` search strategies
+(`r paste(STRATEGY, collapse = ", ")`), and how that distribution shifts with the
+two other experimental factors: population size (`r paste(levels(data$pop_label),
+collapse = ", ")`) and the mutation/variance setting. Every configuration is
+evaluated over 21 seeds.
+
+For each task we present a raincloud plot of performance across strategies
+(faceted by population size and mutation/variance), a five-number summary table,
+and Friedman tests comparing strategies with observations paired by seed, run
+separately within each population-size / mutation-variance cell. The Friedman
+test requires a complete block design, so any seed missing under one or more
+strategies in a cell is excluded; the number of complete seeds (blocks) used is
+reported with each test.
+
+```{r per-task, results='asis'}
+tasks <- sort(unique(data$task))
+
+for (task_id in tasks) {
+  cat(sprintf("\n\n# %s\n\n", task_id))
+
+  task_data <- filter(data, task == task_id)
+  task_label <- gsub("_", "\\\\_", task_id)
+  task_ref <- gsub("[^a-z0-9]+", "-", tolower(task_id))
+
+  cat("\n\n")
+  print(plot_performance(task_data,
+                         title = sprintf("%s --- %s (model %s)",
+                                         METRIC_LABEL, task_id, MODEL)))
+  cat("\n\n")
+
+  print(
+    summarise_metric(task_data,
+                     caption = sprintf("%s five-number summary --- %s",
+                                       METRIC_LABEL, task_label),
+                     label = sprintf("summary-%s", task_ref))
+  )
+
+  print(
+    friedman_table(task_data,
+                   caption = sprintf(
+                     "Friedman test across strategies (paired by seed) --- %s",
+                     task_label),
+                   label = sprintf("friedman-%s", task_ref))
+  )
+}
+```

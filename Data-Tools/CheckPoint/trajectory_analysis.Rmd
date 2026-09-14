@@ -1,0 +1,158 @@
+---
+title: "Best-so-far Trajectory Analysis"
+output:
+  bookdown::pdf_book:
+    toc: false
+documentclass: article
+description: "Checkpoint trajectory supplementary material"
+geometry: margin=1.5cm
+params:
+  model: "RF"
+header-includes:
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 4.5,
+  out.width = "100%",
+  fig.align = 'center',
+  fig.pos = 'H')
+```
+
+```{r load-libraries, include=FALSE}
+library(dplyr)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+```
+
+```{r config, include=FALSE}
+# The single model this report covers (override via render params::model).
+MODEL <- params$model
+
+# Best-so-far metric tracked over accumulated hard evaluations.
+METRIC <- "test_auc"
+METRIC_LABEL <- "Test AUC (best-so-far)"
+
+# Search strategies, in exploration -> exploitation display order.
+STRATEGY <- c("EA_Explore", "TPE25", "TPE50", "TPE75", "TPE100", "EA_Exploit")
+
+# Colour-blind-friendly (Okabe-Ito) palette, one colour per strategy.
+cb_palette <- setNames(
+  c("#0072B2", "#56B4E9", "#009E73", "#E69F00", "#D55E00", "#CC79A7"),
+  STRATEGY)
+
+# Fillable point shapes (21-25 accept a fill), one per strategy.
+SHAPE <- setNames(c(21, 22, 23, 24, 25, 21), STRATEGY)
+```
+
+```{r theme-setup, include=FALSE}
+p_theme <- theme(
+  plot.title = element_text(face = "bold", hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.title = element_text(size = 13),
+  axis.text = element_text(size = 10),
+  strip.text = element_text(size = 11, face = "bold"),
+  legend.position = "bottom",
+  legend.title = element_blank(),
+  legend.text = element_text(size = 11),
+  panel.background = element_rect(fill = "#f1f2f5",
+                                  colour = "white",
+                                  size = 0.5, linetype = "solid")
+)
+
+# Best-so-far trajectory for a single (task, population, mutation/variance)
+# configuration: median across seeds with an inter-quartile ribbon, one line per
+# strategy. One panel per figure -- no faceting.
+plot_trajectory <- function(df, title = NULL, subtitle = NULL) {
+  ggplot(df, aes(x = hard_evals, y = med,
+                 color = strategy, fill = strategy, shape = strategy)) +
+    geom_ribbon(aes(ymin = q1, ymax = q3), alpha = 0.15, colour = NA) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 2.0, colour = "black", stroke = 0.2) +
+    scale_x_continuous(name = "Accumulated hard evaluations") +
+    scale_y_continuous(name = METRIC_LABEL) +
+    scale_colour_manual(values = cb_palette, limits = STRATEGY) +
+    scale_fill_manual(values = cb_palette, limits = STRATEGY) +
+    scale_shape_manual(values = SHAPE, limits = STRATEGY) +
+    labs(title = title, subtitle = subtitle) +
+    p_theme
+}
+```
+
+```{r load-data, include=FALSE}
+data <- read.csv("checkpoint_trajectories.csv", header = TRUE,
+                 stringsAsFactors = FALSE)
+data <- filter(data, model == MODEL)
+
+# Ordered factors / readable facet labels.
+data$strategy <- factor(data$strategy, levels = STRATEGY)
+data$pop_label <- factor(sprintf("Pop %d", data$pop),
+                         levels = sprintf("Pop %d", sort(unique(data$pop))))
+data$mutvar_label <- factor(
+  sprintf("mut=%.2f, var=%.2f", data$mut_rate, data$variance))
+
+# Median + inter-quartile band of the metric across the 21 seeds, per
+# (pop, mut/var, strategy, task, hard_evals) cell.
+traj <- data %>%
+  group_by(pop, pop_label, mut_rate, variance, mutvar_label,
+           strategy, task, hard_evals) %>%
+  summarise(
+    med = median(.data[[METRIC]], na.rm = TRUE),
+    q1  = quantile(.data[[METRIC]], 0.25, na.rm = TRUE),
+    q3  = quantile(.data[[METRIC]], 0.75, na.rm = TRUE),
+    n   = dplyr::n(),
+    .groups = "drop")
+```
+
+# Methodology
+
+This report tracks how the **`r METRIC_LABEL`** of the best-so-far individual
+evolves over the shared 500 hard-evaluation budget for model **`r MODEL`**. Each
+line is the median across 21 seeds and the shaded band spans the inter-quartile
+range (Q1--Q3). Lines are coloured by search strategy
+(`r paste(STRATEGY, collapse = ", ")`).
+
+Because a generation costs one population's worth of evaluations, population size
+sets how finely the budget is sampled: `Pop 25` checkpoints every 25 evaluations
+(20 points), `Pop 50` every 50 (10 points). A separate single-panel figure is
+produced for every (task, population size, mutation/variance) configuration, so
+each population keeps its own `hard_evals` grid and no cross-population
+interpolation is performed.
+
+```{r per-config, results='asis'}
+tasks   <- sort(unique(traj$task))
+pops    <- levels(traj$pop_label)
+mutvars <- levels(traj$mutvar_label)
+
+for (task_id in tasks) {
+  cat(sprintf("\n\n# %s\n\n", task_id))
+
+  for (pop in pops) {
+    for (mv in mutvars) {
+      # Use the .env pronoun so the loop variables are not shadowed by the
+      # same-named data columns (e.g. traj$pop) under dplyr data-masking.
+      cfg <- traj %>%
+        filter(task == .env$task_id,
+               pop_label == .env$pop,
+               mutvar_label == .env$mv)
+      if (nrow(cfg) == 0) next
+
+      cat(sprintf("\n\n## %s --- %s, %s\n\n", task_id, pop, mv))
+      cat("\n\n")
+      print(plot_trajectory(
+        cfg,
+        title = sprintf("%s --- %s (model %s)", METRIC_LABEL, task_id, MODEL),
+        subtitle = sprintf("%s, %s", pop, mv)))
+      cat("\n\n")
+    }
+  }
+}
+```
