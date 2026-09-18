@@ -11,6 +11,11 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
 
+# optunahub imports GitPython, which hard-fails at import without a git
+# executable in $PATH ("Bad git executable"). Silence that check; the
+# catcmawm module is loaded from the local optunahub cache (see cache_catcmawm.sb).
+export GIT_PYTHON_REFRESH=quiet
+
 # standard parameters used for all experiments
 TRAIN_P=0.70
 MODEL=ET
