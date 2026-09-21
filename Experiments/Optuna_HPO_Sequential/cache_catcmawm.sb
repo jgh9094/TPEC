@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=00:15:00
+#SBATCH --mem=4G
+#SBATCH --job-name=cache_catcmawm
+#SBATCH -p defq,moore,preemptable
+
+# ---------------------------------------------------------------------------
+# One-time setup job: pre-cache the OptunaHub "samplers/catcmawm" module so the
+# cmaes Optuna runs never need git/network on the compute nodes.
+#
+# WHY: optunahub imports GitPython at import time (crashes without a `git`
+# executable in $PATH -> "Bad git executable"), and load_module() clones the
+# registry from GitHub on first use. Once the package is cached under
+#   $HOME/.cache/optunahub/github.com/optuna/optunahub-registry/main/package/samplers/catcmawm
+# optunahub loads it locally and performs NO git/network operations.
+#
+# Run this ONCE on a node that has internet + git (login node or an
+# internet-enabled partition). If your compute nodes have no internet, use the
+# manual tarball-upload method instead (see below) -- this job cannot download.
+#
+#   sbatch Experiments/Optuna_HPO/cache_catcmawm.sb
+#   # or just run it directly on the login node:
+#   #   bash Experiments/Optuna_HPO/cache_catcmawm.sb
+# ---------------------------------------------------------------------------
+
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+# Make git available to GitPython if the cluster provides it as a module.
+# (Harmless if `module` or the git module do not exist.)
+module load git 2>/dev/null || true
+
+# Silence GitPython's import-time git check so `import optunahub` never hard-fails,
+# even if no git executable is found.
+export GIT_PYTHON_REFRESH=quiet
+
+CACHE_DIR="$HOME/.cache/optunahub/github.com/optuna/optunahub-registry/main/package/samplers/catcmawm"
+
+echo "=== Pre-caching OptunaHub samplers/catcmawm ==="
+echo "Target cache dir: $CACHE_DIR"
+echo "git executable:   $(command -v git || echo '<none in PATH>')"
+
+python -c "import optunahub; m = optunahub.load_module('samplers/catcmawm'); print('load_module OK:', m.__name__)"
+
+echo "=== Verifying cache ==="
+if [ -f "$CACHE_DIR/catcmawm.py" ]; then
+    ls -la "$CACHE_DIR"
+    echo "SUCCESS: catcmawm is cached. cmaes runs can now load it offline."
+else
+    echo "FAILURE: expected files not found at $CACHE_DIR" >&2
+    echo "This node likely has no internet. Use the manual tarball method:" >&2
+    echo "  1) On a machine with internet+git, build the cache, then:" >&2
+    echo "       cd \$HOME/.cache && tar -czf catcmawm_cache.tgz \\" >&2
+    echo "         optunahub/github.com/optuna/optunahub-registry/main/package/samplers/catcmawm" >&2
+    echo "  2) Copy it to the HPC and: tar -xzf catcmawm_cache.tgz -C \$HOME/.cache" >&2
+    exit 1
+fi
