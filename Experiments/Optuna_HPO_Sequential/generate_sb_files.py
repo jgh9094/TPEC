@@ -86,7 +86,7 @@ TEMPLATE = """\
 #!/bin/bash -l
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=5
 #SBATCH --time=05:00:00
 #SBATCH --mem=200G
 #SBATCH --job-name={job_name}
