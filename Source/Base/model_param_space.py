@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 import copy
+from dataclasses import dataclass
 import numpy as np
 from typeguard import typechecked
-from typing import Tuple, Dict, List, TypedDict, Any, Literal, Union
+from typing import Tuple, Dict, List, TypedDict, Any, Literal, Union, Optional
 
 # Defining custom type alias
 # Value must be exactly one of the specified literals
@@ -23,6 +24,26 @@ class BoolParam(TypedDict):
     bounds: Tuple[bool, bool]
     type: Literal["bool"]
 
+@dataclass(frozen=True)
+class DataContext:
+    """
+    Dataset-derived context that a parameter space needs at construction time to shape its
+    search space (as opposed to the ``random_state`` used only at evaluation time).
+
+    Passed uniformly to every ModelParams subclass ``__init__`` so a pipeline/operator factory
+    can build any operator as ``cls(ctx)`` without special-casing which ones need context.
+    Operators that need none of these fields simply ignore the context.
+
+      * ``n_samples``  -- rows in the training data (bounds n_quantiles, Nystroem components).
+      * ``n_features`` -- feature count of the CURRENT representation reaching the operator
+                          (bounds n_components / n_clusters for decomposition/agglomeration).
+      * ``n_classes``  -- number of target classes (selects the legal ``loss`` set for
+                          GradientBoosting: 'exponential' is binary-only).
+    """
+    n_samples: int
+    n_features: int
+    n_classes: int
+
 # ParamSpec can be one of IntParam, FloatParam, CatParam, and BoolParam
 ParamSpec = Union[IntParam, FloatParam, CatParam, BoolParam]
 # Dictionary where each key is a parameter name, and each value is exactly one of the 3 kinds of ParamSpecs
@@ -31,19 +52,37 @@ ParamSpace = Dict[str, ParamSpec] # {parameter_name: {"bounds": Tuple, "type": L
 @typechecked
 class ModelParams(ABC):
     """
-    This class encapsulates the parameter space and provides
-    helper methods for mutation and random sampling.
+    Abstract base class for a model's hyperparameter space.
+
+    Encapsulates the parameter space and provides shared helper methods for random
+    sampling and mutation. Concrete classifier parameter spaces (e.g., RandomForest,
+    MLP) live in ``Source.ML.classifiers`` and implement the abstract methods below.
     """
     def __init__(self, param_space: ParamSpace):
         self.param_space = param_space
 
-    @abstractmethod
     def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
         """
-        Returns a random set of parameters.
-        Format {parameter_name: value}
+        Generates a random set of parameter values based on the defined parameter space.
+        Each parameter is sampled independently according to its type. Should be ready for
+        hard evaluation. Format {parameter_name: value}.
+
+        Parameters:
+            rng (np.random.Generator): A NumPy random generator instance.
+        Returns:
+            Dict[str, Any]: A dictionary of randomly generated parameters.
         """
-        pass
+        rand_genotype = {}
+        for param_name, spec in self.param_space.items():
+            if spec["type"] == "int":
+                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
+            elif spec["type"] == "float":
+                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
+            elif spec["type"] == "cat":
+                rand_genotype[param_name] = rng.choice(spec["bounds"])
+            else:
+                raise ValueError(f"Unsupported parameter type: {spec['type']}")
+        return rand_genotype
 
     def get_params_by_type(self, type: str) -> Dict:
         """
@@ -111,105 +150,19 @@ class ModelParams(ABC):
         assert len(choices) > 0, "Choices list cannot be empty."
         return rng.choice(choices)
 
-    @abstractmethod
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
+    def mutate_parameters_shift(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
         """
-        Mutates a given set of hyperparameters in-place.
+        Mutates a given set of hyperparameters in-place by shifting each selected gene
+        away from its current value. Each gene is independently mutated with probability
+        ``mut_rate``. Should be ready for hard evaluation.
 
         Parameters:
             model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            var (float): Variation factor for mutation.
+            var (float): Variation factor for the shift.
             mut_rate (float): Probability of mutating each parameter.
             rng (np.random.Generator): A NumPy random generator instance.
         """
-        pass
-
-    @abstractmethod
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        pass
-
-    @abstractmethod
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        pass
-
-    @abstractmethod
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Return a modified copy of 'model_params'. This ensures parameters are adjusted for
-        compatibility with the TPE optimizer.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to adjust.
-
-        Returns:
-            Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
-        """
-        pass
-
-    @abstractmethod
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes a set of parameter returned by TPE for hard evaluation. """
-        pass
-
-@typechecked
-class RandomForestParams(ModelParams):
-    def __init__(self, offset: float = 1.0e-4):
-        super().__init__(param_space={
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            rng (np.random.Generator): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
-        """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
         for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
             if rng.uniform() < mut_rate:
                 if spec["type"] == "int":
                     model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
@@ -219,25 +172,37 @@ class RandomForestParams(ModelParams):
                     model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
                 else:
                     raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
         return model_params
 
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
+    def mutate_parameters_random(self, model_params: Dict[str, Any], mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
         """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
+        Mutates a given set of hyperparameters in-place by resampling each selected gene
+        uniformly from its full range of available options (rather than shifting from its
+        current value). Each gene is independently resampled with probability ``mut_rate``.
 
         Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
+            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
+            mut_rate (float): Probability of resampling each parameter.
             rng (np.random.Generator): A NumPy random generator instance.
         """
-        return
+        for name, spec in self.param_space.items():
+            if rng.uniform() < mut_rate:
+                if spec["type"] == "int":
+                    model_params[name] = int(rng.integers(*spec["bounds"]))
+                elif spec["type"] == "float":
+                    model_params[name] = self.sample_float_parameter(spec, rng)
+                elif spec["type"] == "cat":
+                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
+                else:
+                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
+        return model_params
 
     def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Returns a modified copy of 'model_params', which are parameters adjusted for compatibility
-        with the TPE optimizer.
+        Returns a copy of 'model_params' adjusted for compatibility with the TPE optimizer.
+
+        The default is an identity deep copy (parameters are already TPE-compatible). Subclasses
+        may override this to apply model-specific encoding for the TPE optimizer.
 
         Parameters:
             model_params (Dict[str, Any]): The set of hyperparameters to adjust.
@@ -245,528 +210,23 @@ class RandomForestParams(ModelParams):
         Returns:
             Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
         """
-        model_params_copy = copy.deepcopy(model_params)
-        return model_params_copy
-
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        return {'n_estimators': model_params['n_estimators'],
-                'criterion': model_params['criterion'],
-                'max_depth': model_params['max_depth'],
-                'max_features': model_params['max_features'],
-                'max_samples': model_params['max_samples'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None}
-
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        return "RF"
-
-@typechecked
-class ExtraTreesParams(ModelParams):
-    """
-    Parameter space for scikit-learn's ExtraTreesClassifier (extremely randomized trees).
-
-    Mirrors RandomForestParams but intentionally omits ``max_samples``: ExtraTrees is used
-    with its default ``bootstrap=False`` (the whole sample is drawn for every tree and split
-    thresholds are chosen at random), which is what distinguishes it from Random Forest and
-    is the source of its additional stochasticity. ``max_samples`` only applies when
-    ``bootstrap=True`` in scikit-learn, so it is not part of this space.
-    """
-    def __init__(self, offset: float = 1.0e-4):
-        super().__init__(param_space={
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            rng (np.random.Generator): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
-        """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
-        for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
-            if rng.uniform() < mut_rate:
-                if spec["type"] == "int":
-                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "float":
-                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "cat":
-                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
-                else:
-                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
-        return model_params
-
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """ ExtraTrees requires no post-variation fixes. """
-        return
-
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Returns a deep copy of 'model_params' adjusted for the TPE optimizer. """
         return copy.deepcopy(model_params)
 
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes a set of parameters for hard evaluation with scikit-learn. """
-        return {'n_estimators': model_params['n_estimators'],
-                'criterion': model_params['criterion'],
-                'max_depth': model_params['max_depth'],
-                'max_features': model_params['max_features'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None}
-
+    @abstractmethod
     def get_model_type(self) -> str:
         """
         Returns the model type as a string.
         """
-        return "ET"
+        pass
 
-@typechecked
-class KernelSVCParams(ModelParams):
-    def __init__(self, offset: float = 1.0e-4):
-        super().__init__(param_space = {
-            'C': FloatParam(bounds=(1e-3, 1e2), type='float', log=True),
-            'kernel': CatParam(bounds=('linear', 'poly', 'rbf', 'sigmoid'), type='cat'),
-            'gamma': FloatParam(bounds=(1e-4, 1e1), type='float', log=True),
-            'degree': IntParam(bounds=(2, 5), type='int'),
-            'max_iter': IntParam(bounds=(10000, 100000), type='int'),
-            'class_weight': CatParam(bounds=('None', 'balanced'), type='cat'),
-            'decision_function_shape': CatParam(bounds=('ovo', 'ovr'), type='cat')
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
+    @abstractmethod
+    def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
         """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
+        Fixes a set of parameters for hard evaluation with scikit-learn.
 
-        Parameters:
-            rng (np.random.Generator): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
+        ``random_state`` is an evaluation-time-only input (it does not shape the search space):
+        subclasses whose estimator accepts a ``random_state`` fold it into the returned kwargs
+        so the caller can build the estimator generically as ``Estimator(**eval_parameters(...))``;
+        subclasses whose estimator is deterministic accept and ignore it.
         """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
-        for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
-            if rng.uniform() < mut_rate:
-                if spec["type"] == "int":
-                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "float":
-                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "cat":
-                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
-                else:
-                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
-        return model_params
-
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        return
-
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Returns a deep copy of 'model_params', which are parameters adjusted for the TPE optimizer.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to adjust.
-
-        Returns:
-            Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
-        """
-        model_params_copy = copy.deepcopy(model_params)
-        return model_params_copy
-
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        return {'C': model_params['C'],
-                'kernel': model_params['kernel'],
-                'gamma': model_params['gamma'],
-                'degree': model_params['degree'],
-                'max_iter': model_params['max_iter'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None,
-                'decision_function_shape': model_params['decision_function_shape']}
-
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        return "KSVC"
-
-@typechecked
-class GradientBoostParams(ModelParams):
-    def __init__(self, binary_class: bool, offset: float = 1.0e-4):
-        super().__init__(param_space = {
-            'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat') if binary_class else CatParam(bounds=('log_loss',), type='cat'),
-            'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 8), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            rng (np.random.default_rng): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
-        """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
-        for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
-            if rng.uniform() < mut_rate:
-                if spec["type"] == "int":
-                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "float":
-                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "cat":
-                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
-                else:
-                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
-        return model_params
-
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        return
-
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Returns a deep copy of 'model_params', which are parameters adjusted for the TPE optimizer.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to adjust.
-
-        Returns:
-            Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
-        """
-
-        model_params_copy = copy.deepcopy(model_params)
-        return model_params_copy
-
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        return {'n_estimators': model_params['n_estimators'],
-                'learning_rate': model_params['learning_rate'],
-                'subsample': model_params['subsample'],
-                'criterion': model_params['criterion'],
-                'max_depth': model_params['max_depth'],
-                'max_features': model_params['max_features'],
-                'loss': model_params['loss']}
-
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        return "GB"
-
-@typechecked
-class KNeighborsClassifierParams(ModelParams):
-    def __init__(self, offset: float = 1.0e-4):
-        super().__init__(param_space = {
-            'n_neighbors': IntParam(bounds=(1, 300), type='int'),
-            'weights': CatParam(bounds=('uniform', 'distance'), type='cat'),
-            'algorithm': CatParam(bounds=('ball_tree', 'kd_tree', 'brute'), type='cat'),
-            'leaf_size': IntParam(bounds=(1, 100), type='int'),
-            'p': IntParam(bounds=(1, 5), type='int')
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            rng (np.random.default_rng): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
-        """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
-        for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
-            if rng.uniform() < mut_rate:
-                if spec["type"] == "int":
-                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "float":
-                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "cat":
-                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
-                else:
-                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
-        return model_params
-
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        return
-
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Returns a deep copy of 'model_params', which are parameters adjusted for the TPE optimizer.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to adjust.
-
-        Returns:
-            Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
-        """
-
-        model_params_copy = copy.deepcopy(model_params)
-        return model_params_copy
-
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        return {'n_neighbors': model_params['n_neighbors'],
-                'weights': model_params['weights'],
-                'algorithm': model_params['algorithm'],
-                'leaf_size': model_params['leaf_size'],
-                'p': model_params['p']}
-
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        return "KNN"
-
-@typechecked
-class MLPClassifierParams(ModelParams):
-    def __init__(self, offset: float = 1.0e-4):
-        super().__init__(param_space = {
-            'layer_1': IntParam(bounds=(10, 100), type='int'),
-            'layer_2': IntParam(bounds=(10, 100), type='int'),
-            'layer_3': IntParam(bounds=(10, 100), type='int'),
-            'layer_4': IntParam(bounds=(10, 100), type='int'),
-            'layer_5': IntParam(bounds=(10, 100), type='int'),
-            'activation': CatParam(bounds=('identity', 'logistic', 'tanh', 'relu'), type='cat'),
-            'solver': CatParam(bounds=('lbfgs', 'sgd', 'adam'), type='cat'),
-            'alpha': FloatParam(bounds=(1e-6, 1e-1), type='float', log=True),
-            'max_iter': IntParam(bounds=(10000, 100000), type='int')
-        })
-
-    def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Generates a random set of parameter values based on the defined parameter space.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            rng (np.random.default_rng): A NumPy random generator instance.
-        Returns:
-            Dict[str, Any]: A dictionary of randomly generated parameters.
-        """
-        rand_genotype = {}
-        for param_name, spec in self.param_space.items():
-            if spec["type"] == "int":
-                rand_genotype[param_name] = int(rng.integers(*spec["bounds"]))
-            elif spec["type"] == "float":
-                rand_genotype[param_name] = self.sample_float_parameter(spec, rng)
-            elif spec["type"] == "cat":
-                rand_genotype[param_name] = rng.choice(spec["bounds"])
-            else:
-                raise ValueError(f"Unsupported parameter type: {spec['type']}")
-        # Fix the parameters to ensure they are valid
-        self.variation_fix_parameters(rand_genotype, rng)
-        return rand_genotype
-
-    def mutate_parameters(self, model_params: Dict[str, Any], var: float, mut_rate: float, rng: np.random.Generator) -> Dict[str, Any]:
-        """
-        Mutates the model parameters (genotype) in-place with a given mutation rate.
-        Should be ready for hard evaluation.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to mutate.
-            mut_rate (float): Probability of mutating each parameter.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        # Per-gene mutation
-        for name, spec in self.param_space.items():
-            # Coin flip to decide whether to mutate each parameter
-            if rng.uniform() < mut_rate:
-                if spec["type"] == "int":
-                    model_params[name] = self.shift_int_parameter(int(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "float":
-                    model_params[name] = self.shift_float_parameter(float(model_params[name]), spec['bounds'][0], spec['bounds'][1], var, rng)
-                elif spec["type"] == "cat":
-                    model_params[name] = self.pick_categorical_parameter(spec['bounds'], rng)
-                else:
-                    raise ValueError(f"Unsupported parameter type: {spec['type']}")
-
-        # Fix parameters in case of mutation errors
-        self.variation_fix_parameters(model_params, rng)
-        return model_params
-
-    def variation_fix_parameters(self, model_params: Dict[str, Any], rng: np.random.Generator) -> None:
-        """
-        Fixes parameters (in-place) that do not align with scikit-learn's requirements.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to fix.
-            rng (np.random.Generator): A NumPy random generator instance.
-        """
-        return
-
-    def tpe_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Returns a deep copy of 'model_params', which are parameters adjusted for the TPE optimizer.
-
-        Parameters:
-            model_params (Dict[str, Any]): The set of hyperparameters to adjust.
-
-        Returns:
-            Dict[str, Any]: A copy of 'model_params' adjusted for TPE optimization.
-        """
-
-        model_params_copy = copy.deepcopy(model_params)
-        return model_params_copy
-
-    def eval_parameters(self, model_params: Dict[str, Any]) -> Dict[str, Any]:
-        """ Fixes parameters (in-place) that do not align with scikit-learn's requirements. """
-        return {'layer_1': model_params['layer_1'],
-                'layer_2': model_params['layer_2'],
-                'layer_3': model_params['layer_3'],
-                'layer_4': model_params['layer_4'],
-                'layer_5': model_params['layer_5'],
-                'activation': model_params['activation'],
-                'solver': model_params['solver'],
-                'alpha': model_params['alpha'],
-                'max_iter': model_params['max_iter']}
-
-    def get_model_type(self) -> str:
-        """
-        Returns the model type as a string.
-        """
-        return "MLP"
+        pass
