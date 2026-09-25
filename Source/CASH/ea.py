@@ -1,33 +1,349 @@
 ##########################################################################################
 #
-# Class dedicated to the evolutionary algorithm (EA) optimization of hyperparameters for machine learning models.
-# This CASH (Combined Algorithm Selection and Hyperparameter optimization) EA inherits from BaseEA.
+# CASH (Combined Algorithm Selection and Hyperparameter optimization) EA 4 AutoML.
+#
+# Evolves a full scikit-learn pipeline:
+# feature scaling -> feature engineering -> feature selection -> predictor.
+#
+# Each of the four nodes is an evolved decision (which component, plus its hyperparameters).
+# EA executes the following workflow:
+# - tournament selection
+# - per-offspring mutation/crossover with/out TPE-guided variation
+# - TPE-guided candidate ranking against an evaluated archive.
+#
+# Things to note:
+#   * the genotype is a nested pipeline candidate (see Source/CASH/individual.py)
+#   * variation acts on both the component CHOICE at a node (structural) and that
+#     component's parameters (parametric);
+#   * TPE is the pipeline-aware CASH_TPE (Source/CASH/tpe.py), which models the joint
+#     architecture plus architecture-conditioned parameter evidence;
+#   * evaluation builds a real scikit-learn pipeline, skipping any node whose component is
+#     "passthrough".
 #
 ##########################################################################################
 
 import numpy as np
-import ray
-import numpy.typing as npt
 import copy as cp
+import os
+import time
+import json
+import pandas as pd
+import ray
 
 from typeguard import typechecked
-from typing import List, Dict, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from Source.Base import model_param_space
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import roc_auc_score, r2_score
+from sklearn.preprocessing import (
+    MinMaxScaler, RobustScaler, StandardScaler, MaxAbsScaler, Normalizer,
+    KBinsDiscretizer, Binarizer, PolynomialFeatures, QuantileTransformer, PowerTransformer,
+)
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.decomposition import PCA, FastICA
+from sklearn.cluster import FeatureAgglomeration
+from sklearn.kernel_approximation import Nystroem, RBFSampler
+from sklearn.feature_selection import SelectFwe, SelectPercentile, VarianceThreshold
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, GradientBoostingRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+
 from Source.Base.base_ea import BaseEA
-from Source.Base.ray_utils import cv_random_forest, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp
-from Source.Base.model_param_space import RandomForestParams, KernelSVCParams, GradientBoostParams, KNeighborsClassifierParams, MLPClassifierParams
 from Source.Base.individual import Individual
-import Source.CASH.nsag_toolset as nsga
+from Source.Base.model_param_space import DataContext
+from Source.CASH.individual import CASHIndividual
+from Source.CASH.tpe import CASH_TPE, PipelineSpace, Candidate
+from Source.CASH.archive import CASHArchive
+from Source.Base.archive import (
+    RANDOM_CONSTRUCTION, TPE_CONSTRUCTION,
+    MUTATION_OPERATION, CROSSOVER_OPERATION, CROSSOVER_MUTATION_OPERATION,
+)
 
-from .bo_ray_utils import bo_rf_optimizer, bo_ksvc_optimizer, bo_gb_optimizer, bo_knn_optimizer, bo_mlp_optimizer
+from Source.ML.scaler import SCALERS
+from Source.ML.transformer import TRANSFORMERS
+from Source.ML.selector import SELECTORS
+from Source.ML.classifiers import CLASSIFIERS
+from Source.ML.regressor import REGRESSORS
+
+# Component available at a node when its step is skipped. Represented as a literal string
+# with an empty parameter space (matches the Source/ML registries' convention).
+PASSTHROUGH = "passthrough"
+# Ordered pipeline nodes: (node_name, ModelParams-class registry, whether "passthrough" is
+# an allowed component). Order defines the pipeline execution order and the architecture-key
+# order used by CASH_TPE. The predictor node is mandatory, so it does not allow passthrough.
+PIPELINE_NODES = (
+    ("feature_scaling", SCALERS, True),
+    ("feature_engineering", TRANSFORMERS, True),
+    ("feature_selection", SELECTORS, True),
+    ("predictor", CLASSIFIERS, False),
+)
+
+
+# Feature-preprocessing components (scaling / engineering / selection) shared by both task
+# types. Maps each component's identifier (its ModelParams.get_model_type()) to the scikit-learn
+# estimator class it builds. Keys must stay in sync with the get_model_type() strings of the
+# Source/ML registries.
+PREPROCESSING_CLASSES = {
+    # feature scaling
+    "MinMaxScaler": MinMaxScaler,
+    "RobustScaler": RobustScaler,
+    "StandardScaler": StandardScaler,
+    "MaxAbsScaler": MaxAbsScaler,
+    "Normalizer": Normalizer,
+    # feature engineering
+    "KBinsDiscretizer": KBinsDiscretizer,
+    "Binarizer": Binarizer,
+    "PolynomialFeatures": PolynomialFeatures,
+    "PCA": PCA,
+    "FastICA": FastICA,
+    "FeatureAgglomeration": FeatureAgglomeration,
+    "Nystroem": Nystroem,
+    "RBFSampler": RBFSampler,
+    "QuantileTransformer": QuantileTransformer,
+    "PowerTransformer": PowerTransformer,
+    # feature selection
+    "SelectFwe": SelectFwe,
+    "SelectPercentile": SelectPercentile,
+    "VarianceThreshold": VarianceThreshold,
+}
+
+# Predictor-node component -> scikit-learn estimator, one table per task type. The preprocessing
+# components are shared; only the predictor family differs (classifiers vs. regressors). Note the
+# kernel-SVM identifier differs by task -- "KSVC" (classification) vs. "SVR" (regression) -- which
+# is why the two share no predictor keys beyond the tree/boosting/KNN/MLP families.
+COMPONENT_CLASSES = {
+    **PREPROCESSING_CLASSES,
+    "RF": RandomForestClassifier,
+    "ET": ExtraTreesClassifier,
+    "KSVC": SVC,
+    "GB": GradientBoostingClassifier,
+    "KNN": KNeighborsClassifier,
+    "MLP": MLPClassifier,
+}
+COMPONENT_CLASSES_REGRESSION = {
+    **PREPROCESSING_CLASSES,
+    "RF": RandomForestRegressor,
+    "ET": ExtraTreesRegressor,
+    "SVR": SVR,
+    "GB": GradientBoostingRegressor,
+    "KNN": KNeighborsRegressor,
+    "MLP": MLPRegressor,
+}
+
+
+def build_estimator(component_name: str, eval_kwargs: Dict[str, Any], classification: bool):
+    """
+    Instantiate the scikit-learn estimator for a single pipeline node from its component name
+    and the kwargs produced by that component's ``eval_parameters``.
+
+    The predictor family is chosen by ``classification`` (classifier vs. regressor table); the
+    shared preprocessing components resolve identically in either table. A few components need
+    light post-processing that their ``eval_parameters`` leaves for the construction site
+    (mirroring how Source/HPO/cv_evaluation.py builds the HPO estimators):
+      * ``MLP`` -- the per-layer genes ``layer_1..layer_5`` are recombined into the single
+        ``hidden_layer_sizes`` tuple scikit-learn expects (MLPClassifier or MLPRegressor).
+      * ``KSVC`` -- ``probability=True`` is required so the classification pipeline predictor can
+        expose ``predict_proba`` for ROC-AUC scoring.
+      * ``SVR`` -- the regression kernel-SVM predictor, built directly from its kwargs.
+
+    Args:
+        component_name (str): The component identifier (its ModelParams.get_model_type()).
+        eval_kwargs (Dict[str, Any]): The scikit-learn kwargs from ``eval_parameters``.
+        classification (bool): Whether this pipeline is a classification (True) or regression
+            (False) task; selects the predictor estimator table.
+
+    Returns:
+        A ready-to-fit scikit-learn estimator instance.
+    """
+    kwargs = dict(eval_kwargs)
+    if component_name == "MLP":
+        layers = tuple(kwargs.pop(f"layer_{i}") for i in range(1, 6))
+        mlp_cls = MLPClassifier if classification else MLPRegressor
+        return mlp_cls(hidden_layer_sizes=layers, **kwargs)
+    if component_name == "KSVC":
+        return SVC(**kwargs, probability=True)
+    if component_name == "SVR":
+        return SVR(**kwargs)
+    table = COMPONENT_CLASSES if classification else COMPONENT_CLASSES_REGRESSION
+    return table[component_name](**kwargs)
+
+
+# Node whose evolved scaler must respect the numeric/categorical split (School-B scaling).
+SCALING_NODE = PIPELINE_NODES[0][0]  # "feature_scaling"
+# Predictor node -- the mandatory final step. Its component registry is task-dependent
+# (CLASSIFIERS for classification, REGRESSORS for regression); see _build_pipeline_space.
+PREDICTOR_NODE = PIPELINE_NODES[-1][0]  # "predictor"
+
+
+def assemble_steps(
+    pipeline_steps: List[Tuple[str, str, Dict[str, Any]]],
+    scale_cols: Optional[List[int]],
+    classification: bool,
+) -> List[Tuple[str, Any]]:
+    """
+    Turn a candidate's resolved ``(node_name, component_name, eval_kwargs)`` triples into concrete
+    ``(name, estimator)`` scikit-learn Pipeline steps, dropping any node whose component is
+    ``PASSTHROUGH`` (no identity step inserted).
+
+    The ``feature_scaling`` node gets School-B handling so a scaler never distorts one-hot dummies:
+      * ``scale_cols is None`` -- the base-preprocessed matrix is entirely numeric, so the evolved
+        scaler is applied bare to the whole matrix.
+      * ``scale_cols`` is a non-empty index list -- the matrix also holds columns that must NOT be
+        scaled (one-hot dummies / unlisted passthrough columns), so the scaler is wrapped in a
+        ColumnTransformer that scales ONLY those numeric indices and passes the rest through
+        untouched, preserving their information.
+      * ``scale_cols`` is empty -- there are no numeric columns to scale, so the scaling step is
+        skipped entirely.
+
+    Args:
+        pipeline_steps: Ordered (node_name, component_name, eval_kwargs) per node.
+        scale_cols: Numeric column indices the scaler may touch (see above), or None for an
+            all-numeric matrix.
+        classification: Whether the pipeline is a classification (True) or regression (False)
+            task; forwarded to ``build_estimator`` to pick the predictor estimator table.
+
+    Returns:
+        List[Tuple[str, Any]]: The concrete (name, estimator) Pipeline steps.
+    """
+    steps: List[Tuple[str, Any]] = []
+    for node_name, component_name, eval_kwargs in pipeline_steps:
+        if component_name == PASSTHROUGH:
+            continue
+        estimator = build_estimator(component_name, eval_kwargs, classification)
+        if node_name == SCALING_NODE and scale_cols is not None:
+            if len(scale_cols) == 0:
+                continue  # no numeric columns exist -> nothing for the scaler to do
+            # scale only the numeric columns; leave one-hot dummies (and any other columns) as-is
+            estimator = ColumnTransformer(
+                [("scale", estimator, scale_cols)], remainder="passthrough"
+            )
+        steps.append((node_name, estimator))
+    return steps
+
+
+@ray.remote
+def cv_pipeline_classification(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
+    pipeline_steps: List[Tuple[str, str, Dict[str, Any]]],
+    scale_cols: Optional[List[int]],
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray,
+) -> Tuple[int, float, float, float]:
+    """
+    Build a scikit-learn Pipeline from a candidate's resolved genotype and evaluate one CV fold
+    for a CLASSIFICATION task (scored by ROC-AUC).
+
+    ``pipeline_steps`` is the candidate processed into an ordered list of
+    ``(node_name, component_name, eval_kwargs)`` -- one entry per pipeline node, in execution
+    order. As the steps are processed, any node whose component is ``"passthrough"`` is simply
+    OMITTED (no identity step is inserted); every other node contributes a real estimator built
+    via ``build_estimator``. The predictor node is mandatory, so the assembled pipeline always
+    ends in a classifier exposing ``predict_proba``.
+
+    Called once per (candidate, fold) pair -- i.e. 5 times per candidate under 5-fold CV -- with
+    that fold's preprocessed train/validation arrays.
+
+    Args:
+        X_train, y_train: The fold's training partition (preprocessed upstream).
+        X_validate, y_validate: The fold's validation partition (preprocessed upstream).
+        pipeline_steps: Ordered (node_name, component_name, eval_kwargs) per node.
+        scale_cols: Numeric column indices the feature_scaling scaler may touch (School-B
+            scaling), or None when the matrix is entirely numeric. See ``assemble_steps``.
+        id: Identifier of the candidate this fold belongs to (echoed back for accumulation).
+        binary_class: True for binary classification (ROC-AUC on the positive column),
+            False for multi-class (one-vs-one ROC-AUC over ``labels``).
+        labels: All possible class labels (used for the multi-class ROC-AUC).
+
+    Returns:
+        Tuple[int, float, float, float]: (id, training_auc, validation_auc, status) where
+        status is 1.0 on success and -1.0 if pipeline construction/fit/scoring raised.
+    """
+    try:
+        # process the genotype into pipeline steps (omitting passthrough nodes; the scaler is
+        # made numeric-column-aware when categorical dummies are present -- see assemble_steps)
+        steps = assemble_steps(pipeline_steps, scale_cols, classification=True)
+        model = Pipeline(steps)
+        model.fit(X_train, y_train)
+
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
+        return id, train_acc, val_acc, 1.0
+
+    except Exception as e:
+        print(f"Error in cv_pipeline_classification: {e}")
+        return id, 0.0, 0.0, -1.0
+
+
+@ray.remote
+def cv_pipeline_regression(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
+    pipeline_steps: List[Tuple[str, str, Dict[str, Any]]],
+    scale_cols: Optional[List[int]],
+    id: int,
+    binary_class: Optional[bool] = None,
+    labels: Optional[np.ndarray] = None,
+) -> Tuple[int, float, float, float]:
+    """
+    Build a scikit-learn Pipeline from a candidate's resolved genotype and evaluate one CV fold
+    for a REGRESSION task (scored by R^2).
+
+    Structurally identical to ``cv_pipeline_classification`` -- the same ``assemble_steps`` builds
+    the pipeline (omitting passthrough nodes) -- but the assembled pipeline ends in a regressor and
+    is scored with ``model.predict`` + ``r2_score`` instead of ``predict_proba`` + ROC-AUC. The
+    target is used as-is: pre-scale/transform ``y`` upstream if the chosen predictor needs it.
+
+    ``binary_class`` and ``labels`` are accepted only so the Ray call site can stay uniform with the
+    classification task; they are unused here.
+
+    Args:
+        X_train, y_train: The fold's training partition (preprocessed upstream).
+        X_validate, y_validate: The fold's validation partition (preprocessed upstream).
+        pipeline_steps: Ordered (node_name, component_name, eval_kwargs) per node.
+        scale_cols: Numeric column indices the feature_scaling scaler may touch (School-B
+            scaling), or None when the matrix is entirely numeric. See ``assemble_steps``.
+        id: Identifier of the candidate this fold belongs to (echoed back for accumulation).
+        binary_class: Ignored (present for a uniform call site with the classification task).
+        labels: Ignored (present for a uniform call site with the classification task).
+
+    Returns:
+        Tuple[int, float, float, float]: (id, training_r2, validation_r2, status) where
+        status is 1.0 on success and -1.0 if pipeline construction/fit/scoring raised.
+    """
+    try:
+        # process the genotype into pipeline steps (omitting passthrough nodes; the scaler is
+        # made numeric-column-aware when categorical dummies are present -- see assemble_steps)
+        steps = assemble_steps(pipeline_steps, scale_cols, classification=False)
+        model = Pipeline(steps)
+        model.fit(X_train, y_train)
+
+        train_r2 = float(r2_score(y_train, model.predict(X_train)))
+        val_r2 = float(r2_score(y_validate, model.predict(X_validate)))
+        return id, train_r2, val_r2, 1.0
+
+    except Exception as e:
+        print(f"Error in cv_pipeline_regression: {e}")
+        return id, 0.0, 0.0, -1.0
 
 
 @typechecked
 class EA(BaseEA):
     """
-    CASH (Combined Algorithm Selection and Hyperparameter optimization) EA.
-    Extends BaseEA with multi-model support and Bayesian optimization-guided acquisition functions.
+    CASH EA: evolves full scikit-learn pipelines with TPE-guided variation.
+    Extends BaseEA with pipeline-aware (structural + parametric) mutation and crossover.
     """
 
     def __init__(self,
@@ -36,17 +352,54 @@ class EA(BaseEA):
                  cores: int,
                  mut_prob: float,
                  mut_var: float,
-                 initial_history_size: int) -> None:
+                 tpe_prob: float,
+                 tournament_size: int,
+                 num_offspring: int,
+                 crossover_prob: float,
+                 scalers: Optional[List[str]] = None,
+                 transformers: Optional[List[str]] = None,
+                 selectors: Optional[List[str]] = None,
+                 predictors: Optional[List[str]] = None,
+                 component_mut_prob: float = 0.1,
+                 gamma: float = 0.0,
+                 classification: bool = True) -> None:
         """
-        Initializes the CASH EA class with the provided parameters.
+        Initializes the CASH EA.
 
         Args:
             seed (int): Random seed for reproducibility.
             pop_size (int): Population size for the evolutionary algorithm.
-            cores (int): Number of CPU cores to use for parallel processing.
-            mut_prob (float): Mutation probability for the evolutionary algorithm.
-            mut_var (float): Mutation variance for the evolutionary algorithm.
-            initial_history_size (int): Size of the initial history per model for the Bayesian optimizer.
+            cores (int): Number of CPU cores to use for parallel evaluation.
+            mut_prob (float): Per-parameter (gene-level) mutation probability.
+            mut_var (float): Variance of the small local shift-mutation applied to TPE-guided
+                offspring (non-TPE offspring instead resample parameters uniformly).
+            tpe_prob (float): Probability an offspring is produced via TPE-guided variation.
+            tournament_size (int): Tournament size for parent selection.
+            num_offspring (int): Number of pseudo-offspring generated per TPE-guided step
+                (the most promising is chosen by TPE).
+            crossover_prob (float): Probability an offspring is produced by crossover vs. mutation.
+            scalers (Optional[List[str]]): Component identifiers (``get_model_type()`` names) the
+                evolution may use at the feature_scaling node. An empty list or None means "use the
+                full registered set" for that step. Lets a user restrict which models each pipeline
+                stage may draw from. Unknown names raise at pipeline-space construction.
+            transformers (Optional[List[str]]): Allowed components at the feature_engineering node
+                (empty/None -> full set). See ``scalers``.
+            selectors (Optional[List[str]]): Allowed components at the feature_selection node
+                (empty/None -> full set). See ``scalers``.
+            predictors (Optional[List[str]]): Allowed components at the predictor node
+                (empty/None -> full set). See ``scalers``.
+            component_mut_prob (float): Probability a node's COMPONENT is resampled (structural
+                mutation) during a mutation step; otherwise only that component's parameters are
+                shift-mutated.
+            gamma (float): Fraction of history treated as "good" by TPE.
+            classification (bool): Whether the pipeline optimizes a classification task (True,
+                scored by ROC-AUC) or a regression task (False, scored by R^2). Selects the
+                predictor node's component registry (CLASSIFIERS vs. REGRESSORS) and the
+                CV/test scoring path. Defaults to True.
+
+        Note:
+            The per-step allow-lists restrict only the concrete estimators; the parameter-free
+            ``passthrough`` option (where a node permits it) is always available regardless.
         """
         # initialize the base class
         super().__init__(
@@ -54,892 +407,1069 @@ class EA(BaseEA):
             pop_size=pop_size,
             cores=cores,
             mut_prob=mut_prob,
-            mut_var=mut_var
+            mut_var=mut_var,
+            crossover_prob=crossover_prob,
+            classification=classification,  # classification (ROC-AUC) or regression (R^2)
         )
 
         # CASH-specific validation
-        assert initial_history_size > 0, "Initial history size must be a positive integer."
-        self.initial_history_size = initial_history_size
+        assert 0.0 <= component_mut_prob <= 1.0, "Component mutation probability must be between 0 and 1."
+        self.component_mut_prob = component_mut_prob
 
-        # CASH-specific history tracking for Bayesian optimization (per model type)
-        self.rf_history = {'n_estimators': [], 'criterion': [], 'max_depth': [], 'max_features': [], 'max_samples': [], 'class_weight': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
-        self.ksvc_history = {'C': [], 'kernel': [], 'max_iter': [], 'class_weight': [], 'decision_function_shape': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
-        self.gb_history = {'loss': [], 'learning_rate': [], 'n_estimators': [], 'subsample': [], 'criterion': [], 'max_depth': [], 'max_features': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
-        self.knn_history = {'n_neighbors': [], 'weights': [], 'algorithm': [], 'leaf_size': [], 'p': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
-        self.mlp_history = {'layer_1': [], 'layer_2': [], 'layer_3': [], 'layer_4': [], 'layer_5': [], 'activation': [], 'solver': [], 'max_iter': [], self.SOLUTION_VALIDATION_SCORE: [], self.SOLUTION_TRAIN_SCORE: []}
+        # per-step allow-lists of component identifiers the evolution may use (empty -> full set for
+        # that step). Keyed by node name so _build_pipeline_space can filter each registry. None is
+        # normalized to [] so an empty list and an omitted argument both mean "use every component".
+        self.allowed_components: Dict[str, List[str]] = {
+            "feature_scaling": scalers or [],
+            "feature_engineering": transformers or [],
+            "feature_selection": selectors or [],
+            "predictor": predictors or [],
+        }
 
-        # best individual tracking
+        # EA parameters
+        self.tournament_size = tournament_size
+        self.num_offspring = num_offspring
+
+        # TPE-related parameters
+        self.tpe_prob = tpe_prob
+        self.gamma = gamma
+        # whether the most recent TPE fit succeeded; refreshed once per generation by
+        # generate_offspring and read by the variation operators to gate TPE-guided variation
+        self.tpe_ready = False
+
+        # numeric column indices (in the base-preprocessed matrix) the evolved scaler may touch;
+        # None when every column is numeric (scaler applies to the whole matrix). Set in load_data_pd.
+        self.scale_cols: Optional[List[int]] = None
+
+        # deferred until load_data_pd (all require the dataset-derived DataContext)
+        self.data_ctx: Optional[DataContext] = None
+        self.pipeline_space: Optional[PipelineSpace] = None      # {node: {component: param_space}}
+        self.operators: Optional[dict] = None                    # {node: {component: ModelParams or None}}
+        self.node_names: Optional[Tuple[str, ...]] = None
+        self.tpe: Optional[CASH_TPE] = None
+
+        # full provenance archive of every evaluated individual (generation, construction, ei,
+        # error, genome, performances); built in load_data_pd, saved by save_results, and fed
+        # (deduplicated by genome key) to the TPE surrogate. This is the single source of history.
+        self.eval_archive: Optional[CASHArchive] = None
+        self.hard_eval_count = 0
         self.best_perf = float("-inf")
-        self.best_ind: Optional[Individual] = None
+        # final selected result (architecture + genotype + train/val/test), populated at the end of
+        # evolve() from the provenance archive and consumed by save_results(); no running
+        # best-individual is kept
+        self.best_result: Optional[Dict[str, Any]] = None
+
+        # per-generation diagnostic checkpoints (test performance of the best-so-far individual),
+        # recorded across generations so a checkpoint can stand in for a shorter run
+        self.checkpoints: List[dict] = []
+        # genome key of the most recent checkpoint's selected best, so a full-model test refit is
+        # skipped when the drawn best is genome-identical to the previous checkpoint's
+        self._last_ckpt_key: Optional[str] = None
 
         return
 
-    def evolve(self, gens: int, ucb: bool, pi: bool, ei: bool) -> None:
+    def load_data_pd(self,
+                     data: pd.DataFrame,
+                     target_label: str,
+                     train_p: float,
+                     one_hot_cols: Optional[List[str]] = None,
+                     scalar_cols: Optional[List[str]] = None,
+                     n_folds: int = 5) -> None:
         """
-        Evolves the hyperparameters for all model types over a given number of generations.
-        This function optimizes all 3 acquisition functions (UCB, EI, PI) simultaneously using NSGA-II.
+        Loads data via the base class, then builds the (data-dependent) pipeline space and TPE.
+
+        Several operators size their parameter bounds from the dataset (n_samples / n_features /
+        n_classes via DataContext), so the pipeline space can only be constructed after the data
+        is loaded.
 
         Args:
-            gens (int): Number of generations to evolve.
-            ucb (bool): Whether to use Upper Confidence Bound for selection.
-            pi (bool): Whether to use Probability of Improvement for selection.
-            ei (bool): Whether to use Expected Improvement for selection.
+            n_folds (int): Number of cross-validation folds to build (see BaseEA.load_data_pd).
+                Defaults to 5.
         """
-        if ucb and pi and ei:
-            print("Evolving with all acquisition functions (UCB, PI, EI) using NSGA-II.")
-            self.evolve_3d(gens=gens)
+        super().load_data_pd(data, target_label, train_p, one_hot_cols, scalar_cols, n_folds=n_folds)
+
+        assert self.X_train is not None, "Data must be loaded before building the pipeline space."
+        # n_classes only shapes classifier spaces (e.g. GB's exponential loss); regression targets
+        # have no classes, so labels is None there and n_classes is set to 0 (unused by regressors).
+        n_classes = len(self.labels) if self.labels is not None else 0
+        # cap n_samples at the smallest CV training fold: bounds that scale with training rows
+        # must be realizable on every fold, since each model is fit on k-1 folds during CV.
+        self.data_ctx = DataContext(
+            n_samples=self.smallest_cv_train_size(),
+            n_features=self.X_train.shape[1],
+            n_classes=n_classes,
+        )
+        # Determine which columns the evolved scaler is allowed to touch. The CASH base preprocessor
+        # lays the matrix out numeric-first, so the numeric block is the contiguous index range
+        # [0, n_numeric). If the matrix also contains one-hot dummies or unlisted passthrough columns
+        # (i.e. numeric columns don't cover every original feature), the scaler must scale ONLY that
+        # numeric range and leave the rest untouched; otherwise the whole matrix is numeric and the
+        # scaler applies bare (scale_cols = None).
+        n_numeric = len(self.numerical_cols) if self.numerical_cols else 0
+        has_protected_cols = n_numeric < self.X_train.shape[1]
+        self.scale_cols = list(range(n_numeric)) if has_protected_cols else None
+
+        self._build_pipeline_space()
+        self.tpe = CASH_TPE(gamma=self.gamma, pipeline_space=self.pipeline_space)
+
+        # provenance archive of every evaluated pipeline, saved by save_results
+        self.eval_archive = CASHArchive()
+
         return
 
-    def evolve_3d(self, gens: int) -> None:
+    def _build_pipeline_space(self) -> None:
         """
-        Evolves the hyperparameters for all model types over a given number of generations.
-        This function optimizes all 3 acquisition functions (UCB, EI, PI) simultaneously using NSGA-II.
+        Build the operator table and the TPE pipeline space from the Source/ML registries.
+
+        For each node: instantiate every registered ModelParams class with the DataContext,
+        keyed by its ``get_model_type()`` name, restrict it to the user's per-step allow-list
+        (``self.allowed_components``; an empty list keeps the full registry), and (where allowed)
+        add the parameter-free "passthrough" component. ``self.operators`` holds the live
+        ModelParams objects (used for sampling/mutating that component's parameters; ``None`` for
+        passthrough), while ``self.pipeline_space`` holds the lightweight
+        ``{node: {component: param_space}}`` metadata that CASH_TPE consumes.
+
+        Raises:
+            ValueError: if a node's allow-list names a component the node's registry does not offer.
+        """
+        assert self.data_ctx is not None, "DataContext must be built before the pipeline space."
+
+        operators: dict = {}
+        pipeline_space: PipelineSpace = {}
+        for node, registry, allow_passthrough in PIPELINE_NODES:
+            # the predictor node's registry is task-dependent: classifiers for classification,
+            # regressors for regression (both share the same six model-family identifiers, except
+            # the kernel-SVM, which is "KSVC" vs. "SVR"). Preprocessing nodes are task-agnostic.
+            if node == PREDICTOR_NODE and not self.classification:
+                registry = REGRESSORS
+            # empty allow-list means "use every registered component" for this step
+            allowed = self.allowed_components.get(node, [])
+            node_ops: dict = {}
+            node_space: dict = {}
+            for cls in registry:
+                instance = cls(self.data_ctx)
+                name = instance.get_model_type()
+                if allowed and name not in allowed:
+                    continue  # user restricted this step to a subset that excludes this component
+                node_ops[name] = instance
+                node_space[name] = instance.param_space
+            # fail loudly if the user asked for a component this node cannot provide (typo / wrong step)
+            if allowed:
+                available = [cls(self.data_ctx).get_model_type() for cls in registry]
+                unknown = [m for m in allowed if m not in available]
+                if unknown:
+                    raise ValueError(
+                        f"Unknown component(s) {unknown} for node '{node}'. "
+                        f"Available components: {available}."
+                    )
+            if allow_passthrough:
+                node_ops[PASSTHROUGH] = None
+                node_space[PASSTHROUGH] = {}
+            operators[node] = node_ops
+            pipeline_space[node] = node_space
+
+        self.operators = operators
+        self.pipeline_space = pipeline_space
+        self.node_names = tuple(pipeline_space.keys())
+
+        return
+
+    # ------------------------------------------------------------------ candidate construction
+
+    def _random_node_entry(self, node: str, rng: np.random.Generator) -> dict:
+        """Pick a random component for ``node`` and sample its parameters (``{}`` for passthrough)."""
+        components = list(self.operators[node].keys())
+        name = str(rng.choice(components))
+        ops = self.operators[node][name]
+        params = {} if ops is None else ops.generate_random_parameters(rng)
+        return {"name": name, "params": params}
+
+    def _random_candidate(self, rng: np.random.Generator) -> Candidate:
+        """Build a full random pipeline candidate (one component + params per node)."""
+        return {node: self._random_node_entry(node, rng) for node in self.node_names}
+
+    def _mutate_genotype(self, genotype: Candidate, use_tpe: bool) -> Candidate:
+        """
+        Produce a new pipeline candidate by mutating ``genotype``.
+
+        Each node is mutated independently. With probability ``component_mut_prob`` the node
+        undergoes STRUCTURAL mutation -- its component is resampled and fresh parameters drawn
+        (a passthrough choice is possible where allowed). Otherwise the component is kept and its
+        parameters are mutated PARAMETRICALLY, in a way that matches the offspring's exploration
+        mode: a TPE offspring takes a small local Gaussian shift (variance ``self.mut_var``, per-gene
+        rate ``self.mut_prob``) so it explores near the parent, while a non-TPE offspring resamples
+        each gene uniformly from its full range (``mutate_parameters_random``) so it jumps around
+        unbiased. A parameter-free component (passthrough or default-only operator) simply keeps its
+        empty parameter dict.
+        """
+        child: Candidate = {}
+        for node in self.node_names:
+            entry = genotype[node]
+            if self.rng.random() < self.component_mut_prob:
+                # structural mutation: resample the component and its parameters
+                child[node] = self._random_node_entry(node, self.rng)
+            else:
+                # parametric mutation: keep the component, mutate its parameters
+                name = entry["name"]
+                ops = self.operators[node][name]
+                if ops is None:
+                    params: dict = {}
+                elif use_tpe:
+                    params = ops.mutate_parameters_shift(cp.deepcopy(entry["params"]), self.mut_var, self.mut_prob, self.rng)
+                else:
+                    params = ops.mutate_parameters_random(cp.deepcopy(entry["params"]), self.mut_prob, self.rng)
+                child[node] = {"name": name, "params": params}
+        return child
+
+    def _crossover_child(self, parent_a: Individual, parent_b: Individual, use_tpe: bool) -> Tuple[Candidate, str]:
+        """
+        Produce a single recombined child genotype: uniform (per-node) crossover of the two
+        parents, then (with probability ``self.mut_prob``) a mutation (structural + parametric via
+        ``_mutate_genotype``) matching the exploration mode -- a small local shift on the TPE path,
+        an unbiased random resample otherwise.
+
+        Also reports the variation operator for THIS candidate: ``CROSSOVER_MUTATION_OPERATION`` if
+        the mutation gate fired, else ``CROSSOVER_OPERATION``. This is per-candidate because a TPE
+        roll generates several candidates (each rolling the gate independently) and only the chosen
+        one's operator is recorded.
 
         Args:
-            gens (int): Number of generations to evolve.
-        """
-        # quick sanity checks
-        assert gens > 0, "Number of generations must be a positive integer."
-
-        # step 1: generate a random set of hyperparameters and evaluate them to populate the initial history for the Bayesian optimizer
-        self.initialize_bo_history()
-        print(f"Initial history for Bayesian optimizer populated with {self.initial_history_size} random hyperparameter evaluations per model type.")
-
-        # step 2: initialize the starting population for the ea
-        self.initialize_population()
-        print(f"Initial population for evolutionary algorithm generated with {self.pop_size} random hyperparameter configurations.")
-
-        # step 3: evolve the population over the specified number of generations
-        for g in range(gens):
-            print(f"Starting generation {g + 1}/{gens} of the evolutionary algorithm.")
-            print(f"  rf best validation: {max(self.rf_history[self.SOLUTION_VALIDATION_SCORE]) if self.rf_history[self.SOLUTION_VALIDATION_SCORE] else 'N/A'} size {len(self.rf_history[self.SOLUTION_VALIDATION_SCORE])}")
-            print(f"  gb best validation: {max(self.gb_history[self.SOLUTION_VALIDATION_SCORE]) if self.gb_history[self.SOLUTION_VALIDATION_SCORE] else 'N/A'} size {len(self.gb_history[self.SOLUTION_VALIDATION_SCORE])}")
-            print(f" knn best validation: {max(self.knn_history[self.SOLUTION_VALIDATION_SCORE]) if self.knn_history[self.SOLUTION_VALIDATION_SCORE] else 'N/A'} size {len(self.knn_history[self.SOLUTION_VALIDATION_SCORE])}")
-            print(f"ksvc best validation: {max(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE]) if self.ksvc_history[self.SOLUTION_VALIDATION_SCORE] else 'N/A'} size {len(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE])}")
-            print(f" mlp best validation: {max(self.mlp_history[self.SOLUTION_VALIDATION_SCORE]) if self.mlp_history[self.SOLUTION_VALIDATION_SCORE] else 'N/A'} size {len(self.mlp_history[self.SOLUTION_VALIDATION_SCORE])}")
-            print("*"*50)
-
-            # get fronts and ranks based on the current population's acquisition scores
-            fronts, ranks = nsga.non_dominated_sorting(self.generate_acquisition_scores_for_nsga(population=self.population))
-
-            # compute crowding distances for each front
-            crowding_distances = nsga.crowding_distance(self.generate_acquisition_scores_for_nsga(population=self.population), fronts, count=3)
-
-            # select parents based on ranks and crowding distances
-            parent_ids = [nsga.non_dominated_binary_tournament(ranks, crowding_distances, self.rng) for _ in range(self.pop_size * 2)]  # select twice the population size for mating pool
-
-            # generate offspring through mutation of the selected parents
-            offspring = self.generate_offspring([self.population[i] for i in parent_ids])
-
-            # compute acquisition scores for the offspring
-            self.compute_acquisition_scores(offspring)
-
-            # compute acquisition scores for the offspring
-            offspring_acquisition_scores = self.generate_acquisition_scores_for_nsga(population=offspring)
-
-            # truncate the offspring to the population size based on non-dominated sorting and crowding distance
-            off_fronts, off_ranks = nsga.non_dominated_sorting(offspring_acquisition_scores)
-            off_crowding_distances = nsga.crowding_distance(offspring_acquisition_scores, off_fronts, count=3)
-
-            # get survivor ids based on ranks and crowding distances
-            survivor_ids = nsga.non_dominated_truncate(off_fronts, off_crowding_distances, self.pop_size)
-
-            # update the population with the selected survivors
-            self.population = [offspring[i] for i in survivor_ids]
-
-            # compute performance metrics for the current generation
-            rf_models, ksvc_models, gb_models, knn_models, mlp_models = [ind.get_params() for ind in self.population if ind.model_type == 'rf'], \
-                [ind.get_params() for ind in self.population if ind.model_type == 'ksvc'], \
-                [ind.get_params() for ind in self.population if ind.model_type == 'gb'], \
-                [ind.get_params() for ind in self.population if ind.model_type == 'knn'], \
-                [ind.get_params() for ind in self.population if ind.model_type == 'mlp']
-
-            rf_models, ksvc_models, gb_models, knn_models, mlp_models = self.evaluation(rf_models, ksvc_models, gb_models, knn_models, mlp_models)
-
-            # update the history with the evaluated offspring
-            self.update_history(rf_models, ksvc_models, gb_models, knn_models, mlp_models)
-
-            # make sure population size is maintained
-            assert len(self.population) == self.pop_size, f"Population size mismatch after generation {g + 1}: expected {self.pop_size}, got {len(self.population)}."
-
-        self.final_model_evaluation()
-
-        return
-
-    def initialize_bo_history(self) -> None:
-        """
-        Initializes the history of the Bayesian optimizer with the current hyperparameter evaluations.
-        For each model type, it generates a set of random hyperparameter configurations and evaluates them to populate the history.
-        The total number of random configurations generated is determined by the `self.initial_history_size` parameter.
+            parent_a (Individual): The first parent.
+            parent_b (Individual): The second parent.
+            use_tpe (bool): Which mutation mode to apply if the child is mutated.
 
         Returns:
-            None
+            Tuple[Candidate, str]: The recombined child's pipeline genotype and its variation operator.
         """
-        # generate random hyperparameters for random forest
-        rf_initial_history = []
-        for _ in range(self.initial_history_size):
-            rf_params = model_param_space.RandomForestParams().generate_random_parameters(self.rng)
-            rf_initial_history.append(rf_params)
+        child = self._uniform_crossover(parent_a, parent_b)
 
-        # generate random hyperparameters for kernel SVC
-        ksvc_initial_history = []
-        for _ in range(self.initial_history_size):
-            ksvc_params = model_param_space.KernelSVCParams().generate_random_parameters(self.rng)
-            ksvc_initial_history.append(ksvc_params)
+        # offspring-level mutation gate: with probability mut_prob, mutate the crossover child
+        if self.rng.random() < self.mut_prob:
+            child = self._mutate_genotype(child, use_tpe)
+            return child, CROSSOVER_MUTATION_OPERATION
+        return child, CROSSOVER_OPERATION
 
-        # generate random hyperparameters for gradient boosting
-        gb_initial_history = []
-        for _ in range(self.initial_history_size):
-            gb_params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).generate_random_parameters(self.rng)
-            gb_initial_history.append(gb_params)
-
-        # generate random hyperparameters for k-nearest neighbors
-        knn_initial_history = []
-        for _ in range(self.initial_history_size):
-            knn_params = model_param_space.KNeighborsClassifierParams().generate_random_parameters(self.rng)
-            knn_initial_history.append(knn_params)
-
-        # generate random hyperparameters for multi-layer perceptron
-        mlp_initial_history = []
-        for _ in range(self.initial_history_size):
-            mlp_params = model_param_space.MLPClassifierParams().generate_random_parameters(self.rng)
-            mlp_initial_history.append(mlp_params)
-
-        # evaluate the initial random hyperparameter configurations and populate the history for each model type
-        rf_initial_history, ksvc_initial_history, gb_initial_history, knn_initial_history, mlp_initial_history = self.evaluation(rf_initial_history,
-                                                                                                                                 ksvc_initial_history,
-                                                                                                                                 gb_initial_history,
-                                                                                                                                 knn_initial_history,
-                                                                                                                                 mlp_initial_history)
-
-        # update the history with the evaluated hyperparameter configurations
-        self.update_history(rf_initial_history, ksvc_initial_history, gb_initial_history, knn_initial_history, mlp_initial_history)
-
-        return
-
-    def update_history(self, rf_models: List[Dict],
-                       ksvc_models: List[Dict],
-                       gb_models: List[Dict],
-                       knn_models: List[Dict],
-                       mlp_models: List[Dict]) -> None:
+    def _uniform_crossover(self, parent_a: Individual, parent_b: Individual) -> Candidate:
         """
-        Updates the history of evaluated hyperparameter configurations for each model type.
+        Uniform per-node recombination: for each pipeline node, the offspring inherits that node's
+        component AND its parameters wholesale from either parent with equal probability. Nodes are
+        recombined as a unit (component + params kept together) so the child never pairs one
+        component's name with another's parameters. Returns the recombined genotype (no mutation).
+
+        Args:
+            parent_a (Individual): The first parent.
+            parent_b (Individual): The second parent.
+
+        Returns:
+            Candidate: The recombined pipeline genotype.
         """
+        genotype_a = parent_a.get_genotype()
+        genotype_b = parent_b.get_genotype()
+        assert genotype_a.keys() == genotype_b.keys(), "Parents must share the same pipeline nodes for crossover."
 
-        # quick sanity checks
-        assert len(rf_models) > 0 or len(ksvc_models) > 0 or len(gb_models) > 0 or len(knn_models) > 0 or len(mlp_models) > 0, "At least one model type must be provided for history update."
+        return {
+            node: cp.deepcopy(genotype_a[node] if self.rng.random() < 0.5 else genotype_b[node])
+            for node in self.node_names
+        }
 
-        # update rf history with the new evaluations
-        for params in rf_models:
-            self.rf_history['n_estimators'].append(params['n_estimators'])
-            self.rf_history['criterion'].append(params['criterion'])
-            self.rf_history['max_depth'].append(params['max_depth'])
-            self.rf_history['max_features'].append(params['max_features'])
-            self.rf_history['max_samples'].append(params['max_samples'])
-            self.rf_history['class_weight'].append(params['class_weight'])
-            self.rf_history[self.SOLUTION_VALIDATION_SCORE].append(params[self.SOLUTION_VALIDATION_SCORE])
-            self.rf_history[self.SOLUTION_TRAIN_SCORE].append(params[self.SOLUTION_TRAIN_SCORE])
-        # make sure that all history lists are of the same length after the update
-        history_lengths = [len(self.rf_history[key]) for key in self.rf_history]
-        assert len(set(history_lengths)) == 1, "Mismatch in lengths of RF history lists after update."
+    def _tpe_or_explore(self, tpe_candidate, explore_candidate) -> Tuple[Candidate, str, str, float]:
+        """
+        Shared TPE decision used by both variation operators. Rolls for TPE-guided variation
+        (probability ``self.tpe_prob``, gated on a successful TPE fit ``self.tpe_ready``): on a TPE
+        roll, generate ``self.num_offspring`` candidates via ``tpe_candidate`` and return the one the
+        TPE surrogate ranks best; otherwise return a single candidate from ``explore_candidate``.
+        CASH_TPE scores the nested candidate dicts directly (no per-parameter re-encoding needed).
 
-        # update ksvc history with the new evaluations
-        for params in ksvc_models:
-            self.ksvc_history['C'].append(params['C'])
-            self.ksvc_history['kernel'].append(params['kernel'])
-            self.ksvc_history['max_iter'].append(params['max_iter'])
-            self.ksvc_history['class_weight'].append(params['class_weight'])
-            self.ksvc_history['decision_function_shape'].append(params['decision_function_shape'])
-            self.ksvc_history[self.SOLUTION_VALIDATION_SCORE].append(params[self.SOLUTION_VALIDATION_SCORE])
-            self.ksvc_history[self.SOLUTION_TRAIN_SCORE].append(params[self.SOLUTION_TRAIN_SCORE])
-        # make sure that all history lists are of the same length after the update
-        history_lengths = [len(self.ksvc_history[key]) for key in self.ksvc_history]
-        assert len(set(history_lengths)) == 1, "Mismatch in lengths of KSVC history lists after update."
+        Each candidate factory returns a ``(genotype, operation)`` pair so the chosen candidate's
+        variation operator (which, for crossover, records whether its per-candidate mutation gate
+        fired) is reported alongside the winning genotype.
 
-        # update gb history with the new evaluations
-        for params in gb_models:
-            self.gb_history['loss'].append(params['loss'])
-            self.gb_history['learning_rate'].append(params['learning_rate'])
-            self.gb_history['n_estimators'].append(params['n_estimators'])
-            self.gb_history['subsample'].append(params['subsample'])
-            self.gb_history['criterion'].append(params['criterion'])
-            self.gb_history['max_depth'].append(params['max_depth'])
-            self.gb_history['max_features'].append(params['max_features'])
-            self.gb_history[self.SOLUTION_VALIDATION_SCORE].append(params[self.SOLUTION_VALIDATION_SCORE])
-            self.gb_history[self.SOLUTION_TRAIN_SCORE].append(params[self.SOLUTION_TRAIN_SCORE])
-        # make sure that all history lists are of the same length after the update
-        history_lengths = [len(self.gb_history[key]) for key in self.gb_history]
-        assert len(set(history_lengths)) == 1, "Mismatch in lengths of GB history lists after update."
+        Args:
+            tpe_candidate (Callable[[], Tuple[Candidate, str]]): Factory for a TPE-mode candidate
+                ``(genotype, operation)`` (called ``self.num_offspring`` times on a TPE roll).
+            explore_candidate (Callable[[], Tuple[Candidate, str]]): Factory for a single
+                unbiased-exploration candidate ``(genotype, operation)`` (called once otherwise).
 
-        # update knn history with the new evaluations
-        for params in knn_models:
-            self.knn_history['n_neighbors'].append(params['n_neighbors'])
-            self.knn_history['weights'].append(params['weights'])
-            self.knn_history['algorithm'].append(params['algorithm'])
-            self.knn_history['leaf_size'].append(params['leaf_size'])
-            self.knn_history['p'].append(params['p'])
-            self.knn_history[self.SOLUTION_VALIDATION_SCORE].append(params[self.SOLUTION_VALIDATION_SCORE])
-            self.knn_history[self.SOLUTION_TRAIN_SCORE].append(params[self.SOLUTION_TRAIN_SCORE])
-        # make sure that all history lists are of the same length after the update
-        history_lengths = [len(self.knn_history[key]) for key in self.knn_history]
-        assert len(set(history_lengths)) == 1, "Mismatch in lengths of KNN history lists after update."
+        Returns:
+            Tuple[Candidate, str, str, float]: The chosen candidate's pipeline genotype, its
+            variation operator, its construction tag (``TPE_CONSTRUCTION`` or
+            ``RANDOM_CONSTRUCTION``), and its expected-improvement score (the surrogate's acquisition
+            value for a TPE pick, ``-inf`` for a random pick).
+        """
+        if self.tpe_ready and (self.rng.random() < self.tpe_prob):
+            candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]
+            genotypes = [genotype for genotype, _ in candidate_offspring]
+            candidate_index = self.tpe.suggest_one(genotypes, self.rng)
+            # the acquisition score of the chosen candidate is its expected improvement
+            ei = float(self.tpe.score_candidates([genotypes[candidate_index]])[0])
+            genotype, operation = candidate_offspring[candidate_index]
+            return genotype, operation, TPE_CONSTRUCTION, ei
+        genotype, operation = explore_candidate()
+        return genotype, operation, RANDOM_CONSTRUCTION, float("-inf")
 
-        # update mlp history with the new evaluations
-        for params in mlp_models:
-            self.mlp_history['layer_1'].append(params['layer_1'])
-            self.mlp_history['layer_2'].append(params['layer_2'])
-            self.mlp_history['layer_3'].append(params['layer_3'])
-            self.mlp_history['layer_4'].append(params['layer_4'])
-            self.mlp_history['layer_5'].append(params['layer_5'])
-            self.mlp_history['activation'].append(params['activation'])
-            self.mlp_history['solver'].append(params['solver'])
-            self.mlp_history['max_iter'].append(params['max_iter'])
-            self.mlp_history[self.SOLUTION_VALIDATION_SCORE].append(params[self.SOLUTION_VALIDATION_SCORE])
-            self.mlp_history[self.SOLUTION_TRAIN_SCORE].append(params[self.SOLUTION_TRAIN_SCORE])
-        # make sure that all history lists are of the same length after the update
-        history_lengths = [len(self.mlp_history[key]) for key in self.mlp_history]
-        assert len(set(history_lengths)) == 1, "Mismatch in lengths of MLP history lists after update."
+    # ------------------------------------------------------------------ core EA loop
+
+    def evolve(self, gens: int, checkpoint_dir: Optional[str] = None) -> None:
+        """
+        Run the CASH EA. Mirrors the HPO EA's generational loop: evaluate, archive, select
+        parents, generate offspring (mutation/crossover with optional TPE guidance), evaluate,
+        and track the best-so-far individual.
+
+        NOTE: evaluation of pipelines is not yet implemented (see evaluation()), so this method
+        cannot be run end-to-end until that is added.
+
+        Args:
+            gens (int): Number of generations to evolve.
+            checkpoint_dir (Optional[str]): If provided, the best-so-far individual's test
+                performance is recorded after every generation (diagnostic only).
+        """
+        assert gens > 0, "Number of generations must be a positive integer."
+        assert self.operators is not None, "Data must be loaded before evolving."
+
+        start_time = time.time()
+
+        # initialize and evaluate the starting population
+        self.initialize_population()
+        evaluated = self.evaluation(self.population)
+
+        # record full provenance for the initial (random) population as generation -1 (this is the
+        # sole history store; the TPE surrogate is fit from it, deduplicated by genome key)
+        self.record_history(evaluated, generation=-1)
+        # errored pipelines are archived above but must not seed the next generation
+        self.population = self._drop_errored(evaluated)
+        self.update_best_seen(self.population)
+        print(f"Best performance so far (Gen -1): {self.best_perf}", flush=True)
+        self.checkpoint_best_seen(generation=-1, checkpoint_dir=checkpoint_dir)
+
+        for g in range(gens):
+            # decide per-offspring operators and how many parents they consume
+            var_order, num_parents = self.variation_order(self.pop_size, self.crossover_prob)
+
+            # tournament parent selection
+            parent_ids = self.parent_selection(self.population, num_parents, self.rng)
+
+            # generate offspring via mutation/crossover (TPE-guided where rolled)
+            offspring = self.generate_offspring(self.population, parent_ids, var_order)
+
+            # evaluate offspring (reusing archived/duplicate results where possible)
+            evaluated = self.evaluation(offspring)
+
+            # record full provenance for this generation's offspring
+            self.record_history(evaluated, generation=g)
+            # errored pipelines are archived above but must not seed the next generation
+            self.population = self._drop_errored(evaluated)
+            self.update_best_seen(self.population)
+            print(f"Best performance so far (Gen {g}): {self.best_perf}", flush=True)
+            self.checkpoint_best_seen(generation=g, checkpoint_dir=checkpoint_dir)
+
+        print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
+        print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
+
+        # the best validation performance found across the whole run
+        print(f"Best validation performance found: {self.best_perf}", flush=True)
+
+        # The returned pipeline is drawn from the archive with a random tie-break (``_select_best``).
+        # When checkpointing ran, the final checkpoint already made this draw and stashed it in
+        # ``self.best_result``; reuse it so the saved result matches the last checkpoint exactly.
+        # Otherwise (no checkpointing) draw and evaluate once here.
+        if self.best_result is None:
+            best_individual, best_val = self._select_best()
+            train_score, test_score = self.model_test_evaluation(best_individual)
+            self.best_result = {
+                "architecture": best_individual.get_architecture(),
+                "genotype": best_individual.get_genotype(),
+                "train_performance": train_score,
+                "val_performance": best_val,
+                "test_performance": test_score,
+            }
+
+        print(f"Final test evaluation - Train: {self.best_result['train_performance']}, "
+              f"Val: {self.best_perf}, Test: {self.best_result['test_performance']}", flush=True)
 
         return
 
     def initialize_population(self) -> None:
-        """
-        Initializes the starting population for the evolutionary algorithm (EA) by generating a set of random hyperparameter configurations for each model type.
-        Each model type gets an equal number of individuals, with the remainder distributed evenly across model types.
-        """
-
-        # quick sanity checks
-        assert self.pop_size > 0, "Population size must be a positive integer."
+        """Initialize the population with random pipeline candidates."""
+        assert self.operators is not None, "Data must be loaded before initializing the population."
         assert len(self.population) == 0, "Population has already been initialized."
 
-        model_types = ['rf', 'ksvc', 'gb', 'knn', 'mlp']
-        num_models = len(model_types)
-        base_count = self.pop_size // num_models
-        remainder = self.pop_size % num_models
-
-        # shuffle model types to randomize which ones get the extra individuals from remainder
-        shuffled_types = list(model_types)
-        self.rng.shuffle(shuffled_types)
-
-        for i, model_type in enumerate(shuffled_types):
-            # each model type gets base_count individuals, plus 1 extra if within the remainder
-            count = base_count + (1 if i < remainder else 0)
-
-            for _ in range(count):
-                # generate random hyperparameters for the selected model type
-                if model_type == 'rf':
-                    params = model_param_space.RandomForestParams().generate_random_parameters(self.rng)
-                elif model_type == 'ksvc':
-                    params = model_param_space.KernelSVCParams().generate_random_parameters(self.rng)
-                elif model_type == 'gb':
-                    params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).generate_random_parameters(self.rng)
-                elif model_type == 'knn':
-                    params = model_param_space.KNeighborsClassifierParams().generate_random_parameters(self.rng)
-                elif model_type == 'mlp':
-                    params = model_param_space.MLPClassifierParams().generate_random_parameters(self.rng)
-                else:
-                    raise ValueError(f"Unknown model type: {model_type}")
-
-                # add the individual to the population
-                self.population.append(Individual(params=params, model_type=model_type))
-
-        assert len(self.population) == self.pop_size, "Population size mismatch after initialization."
-
-        # compute the acquisition scores for the initial population based on the current history of evaluated hyperparameter configurations
-        self.compute_acquisition_scores(self.population)
-
+        self.population = []
+        for _ in range(self.pop_size):
+            ind = CASHIndividual(self._random_candidate(self.rng))
+            # the initial population is drawn at random (no TPE guidance)
+            ind.construction = RANDOM_CONSTRUCTION
+            self.population.append(ind)
         return
 
-    def compute_acquisition_scores(self, population: List[Individual]) -> None:
+    def parent_selection(self, population: List[Individual], num_parents: int, rng: np.random.Generator) -> List[int]:
         """
-        Computes the acquisition scores (UCB, EI, PI) for each individual in the population based on the current history of evaluated hyperparameter configurations.
-        The computed scores are stored in the corresponding fields of each individual in the provided population.
+        Select parents via tournament selection (maximize validation performance).
 
-        Args:
-            population (List[Individual]): List of individuals for which to compute acquisition scores.
-        """
-
-        # quick sanity checks
-        assert len(population) > 0, "Population is empty. Cannot compute acquisition scores."
-
-        # will hold the specific index and aquistion score for each individual in the population
-        rf_list, ksvc_list, gb_list, knn_list, mlp_list = [], [], [], [], []
-
-        # hold all the ray remote jobs for acquisition score computation
-        ray_jobs = []
-
-        # iterate through the population and group individuals by model type for acquisition score computation
-        for idx, individual in enumerate(population):
-            model_type = individual.model_type
-            if model_type == 'rf':
-                rf_list.append((idx, individual.get_params()))
-            elif model_type == 'ksvc':
-                ksvc_list.append((idx, individual.get_params()))
-            elif model_type == 'gb':
-                gb_list.append((idx, individual.get_params()))
-            elif model_type == 'knn':
-                knn_list.append((idx, individual.get_params()))
-            elif model_type == 'mlp':
-                mlp_list.append((idx, individual.get_params()))
-            else:
-                raise ValueError(f"Unknown model type: {model_type}")
-
-        # load all rf models into ray remote jobs for acquisition score computation
-        rf_candidates = {'n_estimators': [], 'criterion': [], 'max_depth': [], 'max_features': [], 'max_samples': [], 'class_weight': []}
-        for params in rf_list:
-            rf_candidates['n_estimators'].append(params[1]['n_estimators'])
-            rf_candidates['criterion'].append(params[1]['criterion'])
-            rf_candidates['max_depth'].append(params[1]['max_depth'])
-            rf_candidates['max_features'].append(params[1]['max_features'])
-            rf_candidates['max_samples'].append(params[1]['max_samples'])
-            rf_candidates['class_weight'].append(params[1]['class_weight'])
-
-        if len(rf_list) > 0:
-            ray_jobs.append(bo_rf_optimizer.remote(param_space=RandomForestParams().get_parameter_space(),
-                                                   history=self.rf_history,
-                                                   n_initial_points=len(self.rf_history[self.SOLUTION_VALIDATION_SCORE]),
-                                                   candidates=rf_candidates,
-                                                   seed=self.seed,
-                                                   xi=0.01,
-                                                   kappa=1.0))
-
-        # load all ksvc models into ray remote jobs for acquisition score computation
-        ksvc_candidates = {'C': [], 'kernel': [], 'max_iter': [], 'class_weight': [], 'decision_function_shape': []}
-        for params in ksvc_list:
-            ksvc_candidates['C'].append(params[1]['C'])
-            ksvc_candidates['kernel'].append(params[1]['kernel'])
-            ksvc_candidates['max_iter'].append(params[1]['max_iter'])
-            ksvc_candidates['class_weight'].append(params[1]['class_weight'])
-            ksvc_candidates['decision_function_shape'].append(params[1]['decision_function_shape'])
-
-        if len(ksvc_list) > 0:
-            ray_jobs.append(bo_ksvc_optimizer.remote(param_space=KernelSVCParams().get_parameter_space(),
-                                                    history=self.ksvc_history,
-                                                    n_initial_points=len(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE]),
-                                                    candidates=ksvc_candidates,
-                                                    seed=self.seed,
-                                                    xi=0.01,
-                                                    kappa=1.0))
-
-        # load all gb models into ray remote jobs for acquisition score computation
-        gb_candidates = {'loss': [], 'learning_rate': [], 'n_estimators': [], 'subsample': [], 'criterion': [], 'max_depth': [], 'max_features': []}
-        for params in gb_list:
-            gb_candidates['loss'].append(params[1]['loss'])
-            gb_candidates['learning_rate'].append(params[1]['learning_rate'])
-            gb_candidates['n_estimators'].append(params[1]['n_estimators'])
-            gb_candidates['subsample'].append(params[1]['subsample'])
-            gb_candidates['criterion'].append(params[1]['criterion'])
-            gb_candidates['max_depth'].append(params[1]['max_depth'])
-            gb_candidates['max_features'].append(params[1]['max_features'])
-
-        if len(gb_list) > 0:
-            ray_jobs.append(bo_gb_optimizer.remote(param_space=GradientBoostParams(binary_class=self.binary_classification).get_parameter_space(),
-                                                history=self.gb_history,
-                                                n_initial_points=len(self.gb_history[self.SOLUTION_VALIDATION_SCORE]),
-                                                candidates=gb_candidates,
-                                                seed=self.seed,
-                                                xi=0.01,
-                                                kappa=1.0))
-
-        # load all knn models into ray remote jobs for acquisition score computation
-        knn_candidates = {'n_neighbors': [], 'weights': [], 'algorithm': [], 'leaf_size': [], 'p': []}
-        for params in knn_list:
-            knn_candidates['n_neighbors'].append(params[1]['n_neighbors'])
-            knn_candidates['weights'].append(params[1]['weights'])
-            knn_candidates['algorithm'].append(params[1]['algorithm'])
-            knn_candidates['leaf_size'].append(params[1]['leaf_size'])
-            knn_candidates['p'].append(params[1]['p'])
-
-        if len(knn_list) > 0:
-            ray_jobs.append(bo_knn_optimizer.remote(param_space=KNeighborsClassifierParams().get_parameter_space(),
-                                                    history=self.knn_history,
-                                                    n_initial_points=len(self.knn_history[self.SOLUTION_VALIDATION_SCORE]),
-                                                    candidates=knn_candidates,
-                                                    seed=self.seed,
-                                                    xi=0.01,
-                                                    kappa=1.0))
-
-        # load all mlp models into ray remote jobs for acquisition score computation
-        mlp_candidates = {'layer_1': [], 'layer_2': [], 'layer_3': [], 'layer_4': [], 'layer_5': [], 'activation': [], 'solver': [], 'max_iter': []}
-        for params in mlp_list:
-            mlp_candidates['layer_1'].append(params[1]['layer_1'])
-            mlp_candidates['layer_2'].append(params[1]['layer_2'])
-            mlp_candidates['layer_3'].append(params[1]['layer_3'])
-            mlp_candidates['layer_4'].append(params[1]['layer_4'])
-            mlp_candidates['layer_5'].append(params[1]['layer_5'])
-            mlp_candidates['activation'].append(params[1]['activation'])
-            mlp_candidates['solver'].append(params[1]['solver'])
-            mlp_candidates['max_iter'].append(params[1]['max_iter'])
-
-        if len(mlp_list) > 0:
-            ray_jobs.append(bo_mlp_optimizer.remote(param_space=MLPClassifierParams().get_parameter_space(),
-                                                    history=self.mlp_history,
-                                                    n_initial_points=len(self.mlp_history[self.SOLUTION_VALIDATION_SCORE]),
-                                                    candidates=mlp_candidates,
-                                                    seed=self.seed,
-                                                    xi=0.01,
-                                                    kappa=1.0))
-
-        # process the results of the ray jobs for acquisition score computation (in parallel and asynchronously)
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                acquisition_scores, model_type = ray.get(done_id)
-                if model_type == 'rf':
-                    for idx, score in zip([idx for idx, _ in rf_list], acquisition_scores):
-                        population[idx].set_ucb(score['ucb'])
-                        population[idx].set_ei(score['ei'])
-                        population[idx].set_pi(score['pi'])
-                elif model_type == 'ksvc':
-                    for idx, score in zip([idx for idx, _ in ksvc_list], acquisition_scores):
-                        population[idx].set_ucb(score['ucb'])
-                        population[idx].set_ei(score['ei'])
-                        population[idx].set_pi(score['pi'])
-                elif model_type == 'gb':
-                    for idx, score in zip([idx for idx, _ in gb_list], acquisition_scores):
-                        population[idx].set_ucb(score['ucb'])
-                        population[idx].set_ei(score['ei'])
-                        population[idx].set_pi(score['pi'])
-                elif model_type == 'knn':
-                    for idx, score in zip([idx for idx, _ in knn_list], acquisition_scores):
-                        population[idx].set_ucb(score['ucb'])
-                        population[idx].set_ei(score['ei'])
-                        population[idx].set_pi(score['pi'])
-                elif model_type == 'mlp':
-                    for idx, score in zip([idx for idx, _ in mlp_list], acquisition_scores):
-                        population[idx].set_ucb(score['ucb'])
-                        population[idx].set_ei(score['ei'])
-                        population[idx].set_pi(score['pi'])
-                else:
-                    assert False, f"Unknown model type: {model_type} during acquisition score computation."
-
-        return
-
-    def evaluation(self,
-                   rf_models: List[Dict],
-                   ksvc_models: List[Dict],
-                   gb_models: List[Dict],
-                   knn_models: List[Dict],
-                   mlp_models: List[Dict]) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], List[Dict]]:
-        """
-        Evaluates the performance of a given model type with specified hyperparameters using cross-validation.
-
-        Args:
-            rf_models (List[Dict]): A list of dictionaries containing hyperparameters for Random Forest models.
-            ksvc_models (List[Dict]): A list of dictionaries containing hyperparameters for KernelSVC models.
-            gb_models (List[Dict]): A list of dictionaries containing hyperparameters for Gradient Boost models.
-            knn_models (List[Dict]): A list of dictionaries containing hyperparameters for K-Nearest Neighbors models.
-            mlp_models (List[Dict]): A list of dictionaries containing hyperparameters for Multi-Layer Perceptron models.
+        Parameters:
+            population (List[Individual]): The population of individuals.
+            num_parents (int): The number of parents to select.
+            rng (np.random.Generator): Random number generator for reproducibility.
 
         Returns:
-            Tuple[List[Dict], List[Dict], List[Dict], List[Dict], List[Dict]]: A tuple containing the evaluated models for each type.
+            List[int]: Indices of the selected parent individuals.
         """
-        # quick sanity checks
-        assert len(rf_models) > 0 or len(ksvc_models) > 0 or len(gb_models) > 0 or len(knn_models) > 0 or len(mlp_models) > 0, "At least one model type must be provided for evaluation."
+        assert len(population) > 0, "Population must not be empty."
 
-        # get CV splits from base class
-        cv_splits = self.get_cv_splits()
+        # a tournament cannot draw more distinct competitors than the population holds; dropping
+        # errored pipelines can shrink the population below tournament_size, so clamp accordingly.
+        k = min(self.tournament_size, len(population))
 
-        # load all rf models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
-        ray_jobs = []
-        rf_results = [] # rf_models and rf_results are parallel lists, where rf_results[i] contains the results for rf_models[i]
-        for model_id, rf_params in enumerate(rf_models):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_random_forest.remote(X_train=X_train,
-                                                        y_train=y_train,
-                                                        X_validate=X_validate,
-                                                        y_validate=y_validate,
-                                                        model_params=RandomForestParams().eval_parameters(rf_params),
-                                                        random_state=self.seed,
-                                                        id=model_id,
-                                                        binary_class=self.binary_classification,
-                                                        labels=self.labels)
-                                )
-            rf_results.append({'train_auc': [], 'val_auc': [], 'error': False}) # initialize results for this model_id
-        assert len(rf_results) == len(rf_models), "Mismatch between number of RF models and results."
+        parent_ids = []
+        for _ in range(num_parents):
+            indices = rng.choice(len(population), k, replace=False)
+            extracted_performances = np.array([population[i].get_val_performance() for i in indices])
+            best_tour_idx = np.argmax(extracted_performances)
+            winner = int(rng.choice([i for i, perf in zip(indices, extracted_performances) if perf == extracted_performances[best_tour_idx]]))
+            parent_ids.append(winner)
 
-        # process the results of the ray jobs for random forest models
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                model_id, train_auc, val_auc, error = ray.get(done_id)
-                if error == 1.0:
-                    rf_results[model_id]['train_auc'].append(train_auc)
-                    rf_results[model_id]['val_auc'].append(val_auc)
-                else:
-                    rf_results[model_id]['error'] = True
-                    assert False, f"Error occurred during RF evaluation for model_id {model_id}. Params: {rf_models[model_id]}"
+        return parent_ids
 
-        # compute the average train and validation AUC for each model_id in rf_results
-        for model_id in range(len(rf_results)):
-            rf_models[model_id][self.SOLUTION_TRAIN_SCORE] = np.mean(rf_results[model_id]['train_auc'])
-            rf_models[model_id][self.SOLUTION_VALIDATION_SCORE] = np.mean(rf_results[model_id]['val_auc'])
-
-        # load all ksvc models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
-        ray_jobs = []
-        ksvc_results = [] # ksvc_models and ksvc_results are parallel lists, where ksvc_results[i] contains the results for ksvc_models[i]
-        for model_id, ksvc_params in enumerate(ksvc_models):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_kernel_svc.remote(X_train=X_train,
-                                                     y_train=y_train,
-                                                     X_validate=X_validate,
-                                                     y_validate=y_validate,
-                                                     model_params=KernelSVCParams().eval_parameters(ksvc_params),
-                                                     random_state=self.seed,
-                                                     id=model_id,
-                                                     binary_class=self.binary_classification,
-                                                     labels=self.labels)
-                                )
-            ksvc_results.append({'train_auc': [], 'val_auc': [], 'error': False}) # initialize results for this model_id
-
-        # process the results of the ray jobs for kernel SVC models
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                model_id, train_auc, val_auc, error = ray.get(done_id)
-                if error == 1.0:
-                    ksvc_results[model_id]['train_auc'].append(train_auc)
-                    ksvc_results[model_id]['val_auc'].append(val_auc)
-                else:
-                    ksvc_results[model_id]['error'] = True
-                    assert False, f"Error occurred during Kernel SVC evaluation for model_id {model_id}. Params: {ksvc_models[model_id]}"
-
-        # compute the average train and validation AUC for each model_id in ksvc_results
-        for model_id in range(len(ksvc_results)):
-            ksvc_models[model_id][self.SOLUTION_TRAIN_SCORE] = np.mean(ksvc_results[model_id]['train_auc'])
-            ksvc_models[model_id][self.SOLUTION_VALIDATION_SCORE] = np.mean(ksvc_results[model_id]['val_auc'])
-
-        # load all gb models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
-        ray_jobs = []
-        gb_results = [] # gb_models and gb_results are parallel lists, where gb_results[i] contains the results for gb_models[i]
-        for model_id, gb_params in enumerate(gb_models):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_gradient_boost.remote(X_train=X_train,
-                                                         y_train=y_train,
-                                                         X_validate=X_validate,
-                                                         y_validate=y_validate,
-                                                         model_params=GradientBoostParams(binary_class=self.binary_classification).eval_parameters(gb_params),
-                                                         random_state=self.seed,
-                                                         id=model_id,
-                                                         binary_class=self.binary_classification,
-                                                         labels=self.labels)
-                                )
-            gb_results.append({'train_auc': [], 'val_auc': [], 'error': False})
-
-        # process the results of the ray jobs for gradient boosting models
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                model_id, train_auc, val_auc, error = ray.get(done_id)
-                if error == 1.0:
-                    gb_results[model_id]['train_auc'].append(train_auc)
-                    gb_results[model_id]['val_auc'].append(val_auc)
-                else:
-                    gb_results[model_id]['error'] = True
-                    assert False, f"Error occurred during Gradient Boost evaluation for model_id {model_id}. Params: {gb_models[model_id]}"
-
-        # compute the average train and validation AUC for each model_id in gb_results
-        for model_id in range(len(gb_results)):
-            gb_models[model_id][self.SOLUTION_TRAIN_SCORE] = np.mean(gb_results[model_id]['train_auc'])
-            gb_models[model_id][self.SOLUTION_VALIDATION_SCORE] = np.mean(gb_results[model_id]['val_auc'])
-
-        # load all knn models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
-        ray_jobs = []
-        knn_results = [] # knn_models and knn_results are parallel lists, where knn_results[i] contains the results for knn_models[i]
-        for model_id, knn_params in enumerate(knn_models):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_knn.remote(X_train=X_train,
-                                              y_train=y_train,
-                                              X_validate=X_validate,
-                                              y_validate=y_validate,
-                                              model_params=KNeighborsClassifierParams().eval_parameters(knn_params),
-                                              id=model_id,
-                                              binary_class=self.binary_classification,
-                                              labels=self.labels)
-                                )
-            knn_results.append({'train_auc': [], 'val_auc': [], 'error': False})
-
-        # process the results of the ray jobs for k-nearest neighbors models
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                model_id, train_auc, val_auc, error = ray.get(done_id)
-                if error == 1.0:
-                    knn_results[model_id]['train_auc'].append(train_auc)
-                    knn_results[model_id]['val_auc'].append(val_auc)
-                else:
-                    knn_results[model_id]['error'] = True
-                    assert False, f"Error occurred during KNN evaluation for model_id {model_id}. Params: {knn_models[model_id]}"
-
-        # compute the average train and validation AUC for each model_id in knn_results
-        for model_id in range(len(knn_results)):
-            knn_models[model_id][self.SOLUTION_TRAIN_SCORE] = np.mean(knn_results[model_id]['train_auc'])
-            knn_models[model_id][self.SOLUTION_VALIDATION_SCORE] = np.mean(knn_results[model_id]['val_auc'])
-
-        # load all mlp models into ray remote jobs for all 5-fold cross-validation splits (compute them in parallel and asynchronously)
-        ray_jobs = []
-        mlp_results = [] # mlp_models and mlp_results are parallel lists, where mlp_results[i] contains the results for mlp_models[i]
-        for model_id, mlp_params in enumerate(mlp_models):
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_mlp.remote(X_train=X_train,
-                                              y_train=y_train,
-                                              X_validate=X_validate,
-                                              y_validate=y_validate,
-                                              model_params=MLPClassifierParams().eval_parameters(mlp_params),
-                                              random_state=self.seed,
-                                              id=model_id,
-                                              binary_class=self.binary_classification,
-                                              labels=self.labels)
-                                )
-            mlp_results.append({'train_auc': [], 'val_auc': [], 'error': False})
-
-        # process the results of the ray jobs for multi-layer perceptron models
-        while len(ray_jobs) > 0:
-            done_ids, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
-            for done_id in done_ids:
-                model_id, train_auc, val_auc, error = ray.get(done_id)
-                if error == 1.0:
-                    mlp_results[model_id]['train_auc'].append(train_auc)
-                    mlp_results[model_id]['val_auc'].append(val_auc)
-                else:
-                    mlp_results[model_id]['error'] = True
-                    assert False, f"Error occurred during MLP evaluation for model_id {model_id}. Params: {mlp_models[model_id]}"
-
-        # compute the average train and validation AUC for each model_id in mlp_results
-        for model_id in range(len(mlp_results)):
-            mlp_models[model_id][self.SOLUTION_TRAIN_SCORE] = np.mean(mlp_results[model_id]['train_auc'])
-            mlp_models[model_id][self.SOLUTION_VALIDATION_SCORE] = np.mean(mlp_results[model_id]['val_auc'])
-
-        return rf_models, ksvc_models, gb_models, knn_models, mlp_models
-
-    def generate_acquisition_scores_for_nsga(self, population: List[Individual]) -> npt.NDArray:
+    def generate_offspring(self, candidates: List[Individual], parent_ids: List[int], variation_order: List[str]) -> List[Individual]:
         """
-        Generates a set of acquisition scores from the population formatted for the non_dominated_sorting function.
-        The acquisition scores are extracted as tuples of floats representing the objective values for NSGA-II.
+        Generate offspring from selected parents according to a precomputed variation order.
 
-        Since non_dominated_sorting expects maximization, acquisition scores are used directly:
-        - UCB: Higher values indicate better exploration/exploitation trade-off
-        - EI: Higher values indicate greater expected improvement
-        - PI: Higher values indicate greater probability of improvement
-
-        Note: UCB values can be negative when the predicted performance is poor. The non_dominated_sorting
-        function handles this correctly as it only compares relative values for dominance relationships.
+        Each entry in ``variation_order`` is 'm' (mutation, 1 parent) or 'c' (crossover, 2 parents),
+        and ``parent_ids`` is consumed left-to-right. TPE is fit once here (gated on ``self.tpe_prob``
+        and a successful fit) and the result stashed in ``self.tpe_ready``; each variation operator
+        (``mutate`` / ``crossover``) then owns its own per-offspring TPE decision and offspring generation.
 
         Args:
-            population (List[Individual]): The list of individuals for which to generate acquisition scores.
+            candidates (List[Individual]): The current population (indexed by ``parent_ids``).
+            parent_ids (List[int]): Indices of selected parents, ordered to match consumption.
+            variation_order (List[str]): Per-offspring operators ('m' or 'c').
 
         Returns:
-            npt.NDArray: A numpy array where each element is a tuple of floats representing the acquisition scores
-                        for each individual in the population. The tuple size is 2 or 3 depending on which
-                        acquisition functions are enabled.
+            List[Individual]: One offspring per entry in ``variation_order``.
         """
-        # quick sanity checks
-        assert len(population) > 0, "Population is empty. Cannot generate acquisition scores."
-
-        # extract acquisition scores from the population and format as tuples
-        acquisition_scores = []
-        for individual in population:
-            scores = []
-            scores.append(float(individual.get_ucb()))
-            scores.append(float(individual.get_ei()))
-            scores.append(float(individual.get_pi()))
-
-            acquisition_scores.append(tuple(scores))
-
-        # final sanity checks
-        assert len(acquisition_scores) == len(population), "Mismatch between acquisition scores and population size."
-        assert all(isinstance(score, tuple) for score in acquisition_scores), "All acquisition scores must be tuples."
-        assert all(all(isinstance(val, float) for val in score) for score in acquisition_scores), "All acquisition scores must be floats."
-
-        # Return as numpy array (non_dominated_sorting expects npt.NDArray)
-        # Use dtype=object and np.empty to preserve tuple structure - each element is a tuple
-        result = np.empty(len(acquisition_scores), dtype=object)
-        for i, score in enumerate(acquisition_scores):
-            result[i] = score
-
-        return result
-
-    def generate_offspring(self, parents: List[Individual]) -> List[Individual]:
-        """
-        Generates offspring from the given parents using mutation operations only.
-        Crossover cannot be used because the hyperparameter spaces for each model type are not compatible with each other.
-
-        Args:
-            parents (List[Individual]): A list of parent individuals from the population.
-
-        Returns:
-            List[Individual]: A list of offspring individuals generated from the parents.
-        """
-        # quick sanity checks
-        assert len(parents) > 0, "Parents list is empty. Cannot generate offspring"
+        expected_parents = sum(1 if op == 'm' else 2 for op in variation_order)
+        assert len(parent_ids) == expected_parents, "Number of parent IDs must match the parents required by the variation order."
+        assert len(variation_order) > 0, "At least one offspring must be generated."
+        assert self.eval_archive is not None and len(self.eval_archive) > 0, \
+            "The provenance archive must hold at least one evaluation for TPE-based variation."
 
         offspring = []
 
-        for parent in parents:
-            # generate a mutated offspring from the parent
-            child = self.mutate(parent)
-            offspring.append(child)
+        # fit TPE on the current history; gate TPE-guided variation on a successful fit (the
+        # pipeline-aware fit returns False when history cannot be split into good/bad groups).
+        # tpe_ready is stashed so the variation operators (mutate / crossover) can read it.
+        self.tpe_ready = False
+        if self.tpe_prob > 0.0:
+            self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)
 
+        # consume parents left-to-right as dictated by the variation order. Each variation
+        # operator (mutate / crossover) owns its own TPE decision and offspring generation.
+        parent_cursor = 0
+        for op in variation_order:
+            if op == 'm':
+                parent = candidates[parent_ids[parent_cursor]]
+                parent_cursor += 1
+                offspring.append(self.mutate(parent))
+            else:  # 'c' -> crossover of two parents
+                parent_a = candidates[parent_ids[parent_cursor]]
+                parent_b = candidates[parent_ids[parent_cursor + 1]]
+                parent_cursor += 2
+                offspring.append(self.crossover(parent_a, parent_b))
+
+        assert parent_cursor == len(parent_ids), "All selected parents must be consumed."
+        assert len(offspring) == len(variation_order), "Number of offspring must match the variation order length."
         return offspring
 
-    def final_model_evaluation(self) -> None:
+    def mutate(self, parent: Individual) -> CASHIndividual:
         """
-        Evaluates the final model after the optimization process is complete.
-        This function collects all model/hyperparameter combinations that tie for best validation performance,
-        randomly selects one, fits it on the entire training set, and evaluates it on the test set.
+        Produce one offspring from a single parent, owning the full TPE decision.
+
+        Rolls for TPE-guided variation (probability ``self.tpe_prob``, gated on a successful TPE
+        fit):
+          - non-TPE: a single offspring whose parametric genes are resampled uniformly at random
+            (``mutate_parameters_random``), so it jumps around the space unbiased.
+          - TPE: generate ``self.num_offspring`` candidates whose parametric genes take a small
+            local shift (variance ``self.mut_var``) and keep the one the TPE surrogate ranks best.
+        In both modes each node independently undergoes structural mutation with probability
+        ``component_mut_prob`` (its component is resampled and fresh parameters drawn).
+
+        Args:
+            parent (Individual): The parent whose pipeline is mutated.
+
+        Returns:
+            CASHIndividual: A new offspring pipeline individual.
         """
-
-        # find best performances across all history data structures
-        best_rf = max(self.rf_history[self.SOLUTION_VALIDATION_SCORE], default=-np.inf)
-        best_ksvc = max(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE], default=-np.inf)
-        best_gb = max(self.gb_history[self.SOLUTION_VALIDATION_SCORE], default=-np.inf)
-        best_knn = max(self.knn_history[self.SOLUTION_VALIDATION_SCORE], default=-np.inf)
-        best_mlp = max(self.mlp_history[self.SOLUTION_VALIDATION_SCORE], default=-np.inf)
-
-        # determine the overall best validation score
-        best_overall_score = max([best_rf, best_ksvc, best_gb, best_knn, best_mlp])
-        self.best_perf = best_overall_score
-
-        # collect all model/hyperparameter combinations that achieve the best validation score
-        best_candidates = []
-
-        # collect all RF models that achieve best performance
-        if best_rf == best_overall_score:
-            for idx, score in enumerate(self.rf_history[self.SOLUTION_VALIDATION_SCORE]):
-                if score == best_overall_score:
-                    best_candidates.append({
-                        'model_type': 'RF',
-                        'params': {
-                            'n_estimators': self.rf_history['n_estimators'][idx],
-                            'criterion': self.rf_history['criterion'][idx],
-                            'max_depth': self.rf_history['max_depth'][idx],
-                            'max_features': self.rf_history['max_features'][idx],
-                            'max_samples': self.rf_history['max_samples'][idx],
-                            'class_weight': self.rf_history['class_weight'][idx]
-                        }
-                    })
-
-        # collect all KSVC models that achieve best performance
-        if best_ksvc == best_overall_score:
-            for idx, score in enumerate(self.ksvc_history[self.SOLUTION_VALIDATION_SCORE]):
-                if score == best_overall_score:
-                    best_candidates.append({
-                        'model_type': 'KSVC',
-                        'params': {
-                            'C': self.ksvc_history['C'][idx],
-                            'kernel': self.ksvc_history['kernel'][idx],
-                            'max_iter': self.ksvc_history['max_iter'][idx],
-                            'class_weight': self.ksvc_history['class_weight'][idx],
-                            'decision_function_shape': self.ksvc_history['decision_function_shape'][idx]
-                        }
-                    })
-
-        # collect all GB models that achieve best performance
-        if best_gb == best_overall_score:
-            for idx, score in enumerate(self.gb_history[self.SOLUTION_VALIDATION_SCORE]):
-                if score == best_overall_score:
-                    best_candidates.append({
-                        'model_type': 'GB',
-                        'params': {
-                            'loss': self.gb_history['loss'][idx],
-                            'learning_rate': self.gb_history['learning_rate'][idx],
-                            'n_estimators': self.gb_history['n_estimators'][idx],
-                            'subsample': self.gb_history['subsample'][idx],
-                            'criterion': self.gb_history['criterion'][idx],
-                            'max_depth': self.gb_history['max_depth'][idx],
-                            'max_features': self.gb_history['max_features'][idx]
-                        }
-                    })
-
-        # collect all KNN models that achieve best performance
-        if best_knn == best_overall_score:
-            for idx, score in enumerate(self.knn_history[self.SOLUTION_VALIDATION_SCORE]):
-                if score == best_overall_score:
-                    best_candidates.append({
-                        'model_type': 'KNN',
-                        'params': {
-                            'n_neighbors': self.knn_history['n_neighbors'][idx],
-                            'weights': self.knn_history['weights'][idx],
-                            'algorithm': self.knn_history['algorithm'][idx],
-                            'leaf_size': self.knn_history['leaf_size'][idx],
-                            'p': self.knn_history['p'][idx]
-                        }
-                    })
-
-        # collect all MLP models that achieve best performance
-        if best_mlp == best_overall_score:
-            for idx, score in enumerate(self.mlp_history[self.SOLUTION_VALIDATION_SCORE]):
-                if score == best_overall_score:
-                    best_candidates.append({
-                        'model_type': 'MLP',
-                        'params': {
-                            'layer_1': self.mlp_history['layer_1'][idx],
-                            'layer_2': self.mlp_history['layer_2'][idx],
-                            'layer_3': self.mlp_history['layer_3'][idx],
-                            'layer_4': self.mlp_history['layer_4'][idx],
-                            'layer_5': self.mlp_history['layer_5'][idx],
-                            'activation': self.mlp_history['activation'][idx],
-                            'solver': self.mlp_history['solver'][idx],
-                            'max_iter': self.mlp_history['max_iter'][idx]
-                        }
-                    })
-
-        # randomly select one model/hyperparameter combination from the best candidates
-        assert len(best_candidates) > 0, "No best candidates found for final model evaluation."
-        selected_candidate = best_candidates[self.rng.integers(0, len(best_candidates))]
-
-        print(f"Selected final model: {selected_candidate['model_type']} with validation score: {best_overall_score}")
-        print(f"Total candidates with best performance: {len(best_candidates)}")
-
-        # evaluate best individual on test set using BaseEA method
-        train_score, test_score = self.model_test_evaluation(
-            model_type=selected_candidate['model_type'],
-            model_params=selected_candidate['params']
+        child, operation, construction, ei = self._tpe_or_explore(
+            tpe_candidate=lambda: (self._mutate_genotype(parent.get_genotype(), use_tpe=True), MUTATION_OPERATION),
+            explore_candidate=lambda: (self._mutate_genotype(parent.get_genotype(), use_tpe=False), MUTATION_OPERATION),
         )
+        # a mutation-only offspring has a single parent, so both parent slots reference it
+        return self._build_offspring(child, construction, ei, operation, (parent, parent))
 
-        print(f"Final model train score: {train_score}")
-        print(f"Final model test score: {test_score}")
+    def crossover(self, parent_a: Individual, parent_b: Individual) -> CASHIndividual:
+        """
+        Produce one offspring from two parents, owning the full TPE decision.
 
-        # store the best individual with all performance metrics
-        best_individual = Individual(selected_candidate['params'], selected_candidate['model_type'].lower())
-        best_individual.set_val_performance(best_overall_score)
-        best_individual.set_train_performance(train_score)
-        best_individual.set_test_performance(test_score)
-        self.best_ind = best_individual
+        Rolls for TPE-guided variation (probability ``self.tpe_prob``, gated on a successful TPE
+        fit):
+          - non-TPE: recombine the parents (uniform per-node crossover) and, with probability
+            ``self.mut_prob``, apply an unbiased random mutation to the child; keep that single
+            candidate.
+          - TPE: generate ``self.num_offspring`` recombined candidates, each of which (with
+            probability ``self.mut_prob``) receives a small local shift-mutation, then keep the one
+            the TPE surrogate ranks best.
+
+        Nodes are recombined as a unit (component + params kept together) so the child never pairs
+        one component's name with another's parameters.
+
+        Args:
+            parent_a (Individual): The first parent.
+            parent_b (Individual): The second parent.
+
+        Returns:
+            CASHIndividual: A new offspring pipeline individual.
+        """
+        child, operation, construction, ei = self._tpe_or_explore(
+            tpe_candidate=lambda: self._crossover_child(parent_a, parent_b, use_tpe=True),
+            explore_candidate=lambda: self._crossover_child(parent_a, parent_b, use_tpe=False),
+        )
+        return self._build_offspring(child, construction, ei, operation, (parent_a, parent_b))
+
+    def _build_offspring(self, genotype: Candidate, construction: str, ei: float,
+                         operation: str, parents: Tuple[Individual, Individual]) -> CASHIndividual:
+        """
+        Wrap a child genotype in a CASHIndividual, tagging it with its construction provenance
+        (random vs TPE), its variation operator, and its parents' archive ids -- and, for TPE
+        offspring, its expected-improvement score. All are consumed by :meth:`record_history` when
+        the individual is later archived.
+
+        Args:
+            genotype (Candidate): The child's nested pipeline genotype.
+            construction (str): RANDOM_CONSTRUCTION or TPE_CONSTRUCTION.
+            ei (float): Expected improvement of the chosen candidate (-inf for random offspring).
+            operation (str): The variation operator that produced the child (MUTATION_OPERATION,
+                CROSSOVER_OPERATION, or CROSSOVER_MUTATION_OPERATION).
+            parents (Tuple[Individual, Individual]): The two parents (identical objects for a
+                mutation-only offspring); their archive ids are recorded as the child's lineage.
+
+        Returns:
+            CASHIndividual: The tagged offspring.
+        """
+        assert parents[0].archive_id is not None and parents[1].archive_id is not None, \
+            "Parents must already be archived (carry an archive_id) before producing offspring."
+        child = CASHIndividual(genotype)
+        child.construction = construction
+        if construction == TPE_CONSTRUCTION:
+            child.set_ei(ei)
+        child.operation = operation
+        child.parent_ids = (parents[0].archive_id, parents[1].archive_id)
+        return child
+
+    def _tpe_samples(self) -> List[Individual]:
+        """
+        Build the TPE fitting set from the archive, one sample per UNIQUE pipeline.
+
+        The  archive (``self.eval_archive``) logs every production, including duplicates
+        and errored pipelines. Feeding duplicates to the surrogate would over-weight repeatedly
+        produced genomes in the good/bad split, so we keep only the first entry seen per genome
+        key; because evaluation is genome-deterministic, all entries sharing a key carry identical
+        performances, so the choice of representative is immaterial.
+
+        Each kept entry becomes one CASHIndividual carrying the NEGATED validation performance,
+        because CASH_TPE treats the objective as a minimization (its good/bad split takes the
+        lowest values as "good") while the EA maximizes validation AUC. Errored pipelines were
+        hard-penalized to validation 0.0, so they negate to 0.0 and reliably land in the "bad"
+        group, steering the surrogate away from them.
+        """
+        assert self.eval_archive is not None, "Data must be loaded before fitting TPE."
+
+        samples: List[Individual] = []
+        seen_keys = set()
+        for entry in self.eval_archive:
+            if entry.key in seen_keys:
+                continue
+            seen_keys.add(entry.key)
+            assert entry.val_performance is not None, \
+                "Archived evaluation is missing a validation score (errored pipelines are penalized to 0.0, not None)."
+            ind = self.eval_archive.build_individual(entry)
+            ind.set_val_performance(entry.val_performance * -1.0)  # TPE minimizes, so invert
+            samples.append(ind)
+        return samples
+
+    def record_history(self, individuals: List[Individual], generation: int) -> None:
+        """
+        Record every evaluated individual in the provenance archive (``self.eval_archive``).
+
+        Each individual carries a ``construction`` tag (random vs TPE, set when it was created)
+        and an ``eval_error`` flag (set during evaluation); TPE-constructed individuals also carry
+        their expected-improvement score in ``ind.ei``. Random individuals are archived with the
+        canonical ``-inf`` ei (the archive enforces this), so only TPE offspring pass an ei.
+        Offspring additionally carry a variation ``operation`` tag and their parents'
+        ``parent_ids`` (both None for the initial population). Each individual's assigned archive
+        id is written back to ``ind.archive_id`` so its own offspring can reference it as a parent.
+
+        Args:
+            individuals (List[Individual]): The just-evaluated individuals to record.
+            generation (int): Generation that produced them (-1 for the initial population).
+        """
+        assert self.eval_archive is not None, "Data must be loaded before recording history."
+        for ind in individuals:
+            assert ind.construction is not None, "Individual is missing its construction tag."
+            assert ind.eval_error is not None, "Individual was not evaluated (eval_error unset)."
+            ei = ind.ei if ind.construction == TPE_CONSTRUCTION else None
+            entry = self.eval_archive.add(
+                ind,
+                generation=generation,
+                construction=ind.construction,
+                error=ind.eval_error,
+                ei=ei,
+                operation=ind.operation,
+                parent_ids=ind.parent_ids,
+            )
+            # remember the id this individual was stored under so its offspring can cite it
+            ind.archive_id = entry.id
+        return
+
+    def update_best_seen(self, individuals: List[Individual]) -> None:
+        """
+        Update the best validation performance seen across all generations.
+
+        Only the scalar best-so-far performance is tracked; the winning pipeline itself is
+        recovered from the provenance archive when needed (checkpoints, final selection), so no
+        running copy is kept here.
+
+        Args:
+            individuals (List[Individual]): Individuals to check.
+        """
+        for ind in individuals:
+            perf = ind.get_val_performance()
+            if perf > self.best_perf:
+                self.best_perf = perf
+        return
+
+    def _select_best(self) -> Tuple[CASHIndividual, float]:
+        """
+        Draw the current best pipeline from the provenance archive, breaking validation ties
+        uniformly at random with ``self.rng``, and return it (with its validation performance set)
+        alongside that validation score.
+
+        Both the per-generation checkpoint and the final evaluation select through here, so a
+        checkpoint recorded at a given evaluation budget is drawn by exactly the same rule as a full
+        run that stops at that budget -- which is what lets a checkpoint stand in for a shorter run
+        without re-running. Because the draw consumes ``self.rng``, enabling checkpointing shifts the
+        search trajectory relative to a run with checkpointing off.
+        """
+        assert self.eval_archive is not None, "No archive to select the best individual from."
+        best_entry = self.eval_archive.best(self.rng)
+        assert best_entry is not None and best_entry.val_performance is not None, \
+            "Archive holds no scoreable individual to select."
+        best_val = float(best_entry.val_performance)
+        # consistency guard: the archive's best validation must match the tracked best-so-far
+        assert best_val == self.best_perf, (
+            f"Archive best validation ({best_val}) does not match the best "
+            f"validation performance tracked during the run ({self.best_perf})."
+        )
+        best_individual = self.eval_archive.build_individual(best_entry)
+        best_individual.set_val_performance(best_val)
+        return best_individual, best_val
+
+    def checkpoint_best_seen(self, generation: int, checkpoint_dir: Optional[str]) -> None:
+        """
+        Record the test-set performance of the best-so-far individual for one generation
+        (diagnostic aid, and a stand-in for a run that stops at that evaluation budget). The best
+        pipeline is drawn from the archive via ``_select_best`` -- the SAME random tie-break used
+        for the final result -- so the final checkpoint's selection is exactly what ``evolve``
+        returns. It is only re-evaluated on the test set when its genome differs from the previous
+        checkpoint's; a genome-identical draw reuses the previous scores.
+
+        Args:
+            generation (int): Generation index (-1 for the initial population).
+            checkpoint_dir (Optional[str]): Directory to write ``checkpoints.csv`` into; None
+                disables checkpointing.
+        """
+        if checkpoint_dir is None:
+            return
+
+        # draw the current best with the same random tie-break used for the final result
+        assert self.eval_archive is not None, "No archive to checkpoint from."
+        best_individual, best_val = self._select_best()
+
+        # refit on the test set only when the drawn genome changed since the previous checkpoint
+        ckpt_key = self.eval_archive.compute_key(best_individual)
+        if self.checkpoints and self._last_ckpt_key == ckpt_key:
+            train_score = self.checkpoints[-1]["train_auc"]
+            test_score = self.checkpoints[-1]["test_auc"]
+        else:
+            train_score, test_score = self.model_test_evaluation(best_individual)
+        self._last_ckpt_key = ckpt_key
+
+        self.checkpoints.append({
+            "generation": generation,
+            "hard_evals": self.hard_eval_count,
+            "val_auc": float(best_val),
+            "train_auc": float(train_score),
+            "test_auc": float(test_score),
+        })
+
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        csv_path = os.path.join(checkpoint_dir, "checkpoints.csv")
+        pd.DataFrame(self.checkpoints).to_csv(csv_path, index=False)
+
+        # record this selection so the final evaluation returns exactly the last checkpoint
+        self.best_result = {
+            "architecture": best_individual.get_architecture(),
+            "genotype": best_individual.get_genotype(),
+            "train_performance": train_score,
+            "val_performance": best_val,
+            "test_performance": test_score,
+        }
+
+        print(f"Checkpoint (Gen {generation}) - Val {self.metric_name}: {self.best_perf:.4f}, "
+              f"Train {self.metric_name}: {train_score:.4f}, Test {self.metric_name}: {test_score:.4f}", flush=True)
 
         return
 
+    # ------------------------------------------------------------------ evaluation
+
+    def _build_preprocessor(self) -> ColumnTransformer:
+        """
+        Build the CASH base preprocessor: only make the data numeric so the evolved pipeline can
+        take over. Categorical columns are one-hot-encoded; numeric columns are passed through
+        UNSCALED because scaling is an evolved decision (the pipeline's ``feature_scaling`` node),
+        not a fixed baseline step. Doing otherwise would both double-scale (base scaler + evolved
+        scaler) and rob a passthrough scaling node of its meaning.
+
+        The numeric columns are listed FIRST (as an explicit passthrough) so the output matrix has
+        a stable, fit-independent layout: the numeric block always occupies indices
+        ``[0, len(numerical_cols))``, followed by the one-hot dummies and any remaining columns.
+        This is what lets the evolved scaler target the numeric columns by index.
+
+        Returns:
+            ColumnTransformer: The configured preprocessor (numeric passthrough first, then
+            one-hot; everything else passes through untouched).
+        """
+        transformers = []
+        if self.numerical_cols:
+            transformers.append(('num', 'passthrough', self.numerical_cols))
+        if self.categorical_cols:
+            transformers.append(('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), self.categorical_cols))
+
+        return ColumnTransformer(transformers=transformers, remainder='passthrough')
+
+    def _resolve_pipeline_steps(self, genotype: Candidate) -> List[Tuple[str, str, Dict[str, Any]]]:
+        """
+        Turn a candidate's nested genotype into an ordered, serializable list of pipeline steps
+        for the Ray evaluation task: one ``(node_name, component_name, eval_kwargs)`` per node, in
+        pipeline execution order. Each component's own ``eval_parameters`` translates its evolved
+        genotype into scikit-learn kwargs (the seed is folded in for stochastic estimators);
+        passthrough nodes carry the ``PASSTHROUGH`` marker with empty kwargs and are dropped later,
+        when the pipeline is assembled inside the CV task (``cv_pipeline_classification`` /
+        ``cv_pipeline_regression``).
+
+        Args:
+            genotype (Candidate): The nested pipeline genotype ({node: {"name", "params"}}).
+
+        Returns:
+            List[Tuple[str, str, Dict[str, Any]]]: Ordered per-node (node, component, kwargs).
+        """
+        steps: List[Tuple[str, str, Dict[str, Any]]] = []
+        for node in self.node_names:
+            entry = genotype[node]
+            name = entry["name"]
+            ops = self.operators[node][name]
+            if ops is None:  # passthrough: no estimator, marked for omission at build time
+                steps.append((node, PASSTHROUGH, {}))
+            else:
+                steps.append((node, name, ops.eval_parameters(entry["params"], random_state=self.seed)))
+        return steps
+
+    def evaluation(self, candidates: List[Individual]) -> List[Individual]:
+        """
+        Evaluate pipeline individuals using Ray across 5-fold cross-validation, updating each
+        individual's train and validation performance.
+
+        One Ray task is launched per (candidate, fold) pair so every fold of every pipeline evaluates
+        in parallel. Each fold's preprocessed data already lives in the Ray object store
+        (see BaseEA._prepare_cv_folds), so a task loads only the single fold it needs. The candidate's
+        resolved pipeline steps (see ``_resolve_pipeline_steps``) are passed to each fold task, which
+        builds the scikit-learn Pipeline (omitting passthrough nodes) and scores it. As results stream
+        back, per-fold performances are accumulated per pipeline and its mean CV performance is finalized
+        once all of its folds arrive.
+
+        Args:
+            candidates (List[Individual]): List of individuals to evaluate.
+
+        Returns:
+            List[Individual]: The evaluated individuals with updated performance metrics.
+        """
+        # get per-fold CV data (each fold's arrays live in the Ray object store)
+        cv_splits = self.get_cv_splits()
+        num_folds = len(cv_splits)
+
+        # Deduplicate before evaluating: a pipeline is deterministic under a fixed seed + CV, so any
+        # candidate whose genome was already evaluated (recorded in the provenance archive, or seen
+        # earlier in THIS batch) reuses those performances instead of being re-evaluated. Only the
+        # first sighting of each distinct genome is dispatched to Ray as a hard evaluation.
+        pending = self._resolve_duplicates(candidates)
+
+        # classification pipelines are scored by ROC-AUC, regression pipelines by R^2 (the
+        # regression task ignores binary_class/labels, which are passed for a uniform call site)
+        cv_pipeline = cv_pipeline_classification if self.classification else cv_pipeline_regression
+
+        # launch one Ray task per (pending candidate, fold) so every fold evaluates in parallel
+        ray_jobs = []
+        for model_id, ind in enumerate(pending):
+            pipeline_steps = self._resolve_pipeline_steps(ind.get_genotype())
+            for X_train, y_train, X_validate, y_validate in cv_splits:
+                ray_jobs.append(cv_pipeline.remote(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_validate=X_validate,
+                    y_validate=y_validate,
+                    pipeline_steps=pipeline_steps,
+                    scale_cols=self.scale_cols,
+                    id=model_id,
+                    binary_class=self.binary_classification,
+                    labels=self.labels,
+                ))
+
+        # accumulate fold performances per pending pipeline as results arrive; track whether any
+        # fold errored so the individual can be flagged when archived
+        pop_results = [{'train_acc': [], 'val_acc': [], 'error': False} for _ in pending]
+
+        while len(ray_jobs) > 0:
+            finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
+            for done_id in finished:
+                model_id, train_acc, val_acc, error = ray.get(done_id)
+
+                # A CASH pipeline can legitimately fail to fit on a fold when its evolved components
+                # are mutually incompatible (e.g. a VarianceThreshold that removes every feature, or
+                # a chi2 kernel on signed input). Such a fold is not an error to abort on -- but a
+                # pipeline that fails on ANY fold is penalized completely (fitness forced to 0.0, see
+                # finalize below) so that only pipelines succeeding across all folds survive into the population.
+                if error < 0.0:
+                    pop_results[model_id]['error'] = True
+                    print(f"Pipeline {model_id} failed on a fold (fitness penalized to 0.0).", flush=True)
+
+                # track this fold's performance for the corresponding pipeline as it comes in
+                pop_results[model_id]['train_acc'].append(train_acc)
+                pop_results[model_id]['val_acc'].append(val_acc)
+
+                # once all folds for this pipeline are in, finalize its CV performance. Any fold
+                # failure is a complete penalty (0.0/0.0), not an average that could still look
+                # competitive; only an all-fold success keeps its true mean CV performance.
+                if len(pop_results[model_id]['val_acc']) == num_folds:
+                    errored = pop_results[model_id]['error']
+                    # Errored pipelines are penalized to the reliably-worst score so they never
+                    # outrank a real evaluation. For classification (ROC-AUC in [0, 1]) that floor
+                    # is 0.0; for regression (R^2 in (-inf, 1]) 0.0 is NOT the worst -- it is
+                    # "predicts the mean" -- so we use -inf to keep errored pipelines out of the
+                    # good group when the TPE surrogate is fit.
+                    penalty = 0.0 if self.classification else float("-inf")
+                    mean_train = penalty if errored else float(np.mean(pop_results[model_id]['train_acc']))
+                    mean_val = penalty if errored else float(np.mean(pop_results[model_id]['val_acc']))
+                    pending[model_id].set_train_performance(mean_train)
+                    pending[model_id].set_val_performance(mean_val)
+                    pending[model_id].eval_error = errored
+                    print(f"Pipeline {model_id} evaluated - Train {self.metric_name}: {mean_train:.4f}, Val {self.metric_name}: {mean_val:.4f}", flush=True)
+
+        # in-batch duplicates: candidates that shared a (not-previously-seen) genome with a pending
+        # sibling were not dispatched, so copy the freshly evaluated result onto them.
+        if self.eval_archive is not None:
+            evaluated_by_key = {self.eval_archive.compute_key(ind): ind for ind in pending}
+            for ind in candidates:
+                if ind.val_performance is None:
+                    src = evaluated_by_key[self.eval_archive.compute_key(ind)]
+                    ind.set_train_performance(src.get_train_performance())
+                    ind.set_val_performance(src.get_val_performance())
+                    ind.eval_error = src.eval_error
+
+        # every distinct genome that reached Ray is one hard (real pipeline-fitting) evaluation
+        self.hard_eval_count += len(pending)
+        return candidates
+
+    def _reuse_archived_performance(self, ind: Individual) -> bool:
+        """
+        If ``ind``'s genome was already evaluated (recorded in the provenance archive), copy the
+        stored train/validation/error onto it and return True; otherwise return False.
+
+        Pipeline performances are genome-deterministic (fixed seed + CV folds), so a previously
+        evaluated pipeline need not be re-fit -- this is what lets the EA skip redundant hard
+        evaluations.
+
+        Args:
+            ind (Individual): The individual to (possibly) populate from the archive.
+
+        Returns:
+            bool: True if archived results were reused (``ind`` is now evaluated), else False.
+        """
+        if self.eval_archive is None:
+            return False
+        for entry in self.eval_archive.entries_for(ind):
+            if entry.train_performance is not None and entry.val_performance is not None:
+                ind.set_train_performance(entry.train_performance)
+                ind.set_val_performance(entry.val_performance)
+                ind.eval_error = entry.error
+                return True
+        return False
+
+    def _drop_errored(self, evaluated: List[Individual]) -> List[Individual]:
+        """
+        Return the breeding population: the evaluated individuals with any that errored removed.
+
+        Errored pipelines are still archived (for provenance and dedup) but must not seed the next
+        generation. If every individual errored there is nothing to breed from, so the full set is
+        kept (with a warning) rather than returning an empty population.
+
+        Args:
+            evaluated (List[Individual]): The just-evaluated individuals.
+
+        Returns:
+            List[Individual]: The survivors (or all of ``evaluated`` if none survived).
+        """
+        survivors = [ind for ind in evaluated if not ind.eval_error]
+        if not survivors:
+            print("All pipelines errored this generation; keeping them so the run can continue.", flush=True)
+            return evaluated
+        if len(survivors) < len(evaluated):
+            print(f"Removed {len(evaluated) - len(survivors)} errored pipeline(s) from the population.", flush=True)
+        return survivors
+
+    def _resolve_duplicates(self, candidates: List[Individual]) -> List[Individual]:
+        """
+        Partition ``candidates`` for evaluation: reuse archived results for genomes already seen in
+        a previous generation, and collapse genomes repeated within this batch to a single sighting.
+
+        Individuals whose genome is in the archive are populated in place (via
+        :meth:`_reuse_archived_performance`) and excluded from the returned list. The returned list
+        holds the first occurrence of each remaining distinct genome -- the ones that must be hard
+        evaluated; later in-batch duplicates are filled in after evaluation by the copy pass in
+        :meth:`evaluation`.
+
+        Args:
+            candidates (List[Individual]): The individuals about to be evaluated.
+
+        Returns:
+            List[Individual]: The individuals that still require a hard evaluation.
+        """
+        pending: List[Individual] = []
+        seen_keys = set()
+        for ind in candidates:
+            if self._reuse_archived_performance(ind):
+                continue
+            if self.eval_archive is None:
+                pending.append(ind)
+                continue
+            key = self.eval_archive.compute_key(ind)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                pending.append(ind)
+            # else: duplicate of a pending genome in this same batch -> filled in post-evaluation
+        return pending
+
+    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float]:
+        """
+        Fit an individual's pipeline on the full training set and evaluate on the held-out test
+        set, returning (train_score, test_score).
+
+        The CASH base preprocessor (one-hot only; numerics pass through unscaled) is fit on the
+        full training split and applied to both train and test, then the candidate's scikit-learn
+        Pipeline is assembled from its genotype -- the same steps as ``evaluation`` (omitting
+        "passthrough" nodes, numeric-column-aware scaler) via ``_resolve_pipeline_steps``/``assemble_steps``
+        -- fit on the preprocessed training data. Classification pipelines are scored by train/test
+        ROC-AUC (via ``predict_proba``); regression pipelines by train/test R^2 (via ``predict``).
+
+        This is only ever called on the CV-validated best-so-far individual (recovered from the
+        provenance archive), which fit successfully on all folds, so no per-fold failure handling
+        is needed here.
+
+        Args:
+            individual (Individual): The individual to evaluate.
+
+        Returns:
+            Tuple[float, float]: (train_score, test_score).
+        """
+        assert self.X_train is not None and self.X_test is not None, "Data must be loaded before evaluation."
+        assert self.y_train is not None and self.y_test is not None, "Data must be loaded before evaluation."
+
+        # preprocess (one-hot only; numerics pass through unscaled) with the base preprocessor,
+        # fit on train only
+        preprocessor = self._build_preprocessor()
+        X_train_preprocessed = preprocessor.fit_transform(self.X_train)
+        X_test_preprocessed = preprocessor.transform(self.X_test)
+
+        # assemble the candidate's pipeline (omitting passthrough nodes; scaler is numeric-column-
+        # aware when dummies are present) and fit on the full train -- same steps as evaluation
+        pipeline_steps = self._resolve_pipeline_steps(individual.get_genotype())
+        steps = assemble_steps(pipeline_steps, self.scale_cols, classification=self.classification)
+        model = Pipeline(steps)
+        model.fit(X_train_preprocessed, self.y_train)
+
+        # regression pipelines are scored by R^2 (predict); classification by ROC-AUC (predict_proba)
+        if not self.classification:
+            train_score = float(r2_score(self.y_train, model.predict(X_train_preprocessed)))
+            test_score = float(r2_score(self.y_test, model.predict(X_test_preprocessed)))
+            return train_score, test_score
+
+        assert self.binary_classification is not None, "Data must be loaded before evaluation."
+        train_pred_proba = model.predict_proba(X_train_preprocessed)
+        test_pred_proba = model.predict_proba(X_test_preprocessed)
+
+        if self.binary_classification:
+            train_score = float(roc_auc_score(self.y_train, train_pred_proba[:, 1]))
+            test_score = float(roc_auc_score(self.y_test, test_pred_proba[:, 1]))
+        else:
+            train_score = float(roc_auc_score(self.y_train, train_pred_proba, multi_class='ovo', labels=self.labels))
+            test_score = float(roc_auc_score(self.y_test, test_pred_proba, multi_class='ovo', labels=self.labels))
+
+        return train_score, test_score
+
+    # ------------------------------------------------------------------ results
+
     def save_results(self, save_dir: str) -> None:
         """
-        Save final results using the best individual evaluated at the end of evolve().
-        The JSON will contain train, validation, and test accuracy as well as the hyperparameter settings.
+        Save final results (train/validation/test AUC and the winning pipeline genotype) as JSON.
         """
-        import os
-        import json
+        assert self.best_result is not None, "No best result found. Run evolve() first."
 
-        assert self.best_ind is not None, "No best individual found. Run evolve() first."
-
-        print(f"Best individual params: {self.best_ind.get_params()}", flush=True)
+        print(f"Best pipeline: {self.best_result['genotype']}", flush=True)
         print(f"Best validation performance: {self.best_perf}", flush=True)
 
-        # Create output directory structure if it doesn't exist
-        task_output_dir = os.path.join(save_dir)
-        os.makedirs(task_output_dir, exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
 
-        # Save best individual results as JSON
         best_results = {
             "task_id": self.task_id,
-            "model_type": self.best_ind.model_type,
             "seed": self.seed,
-            "train_accuracy": self.best_ind.get_train_performance(),
+            "architecture": self.best_result["architecture"],
+            "train_accuracy": self.best_result["train_performance"],
             "validation_accuracy": float(self.best_perf),
-            "test_accuracy": self.best_ind.get_test_performance(),
-            "best_params": self.best_ind.get_params(),
+            "test_accuracy": self.best_result["test_performance"],
+            "best_pipeline": self.best_result["genotype"],
         }
 
-        json_path = os.path.join(task_output_dir, "best_results.json")
+        json_path = os.path.join(save_dir, "best_results.json")
         with open(json_path, 'w') as f:
             json.dump(best_results, f, indent=4)
         print(f"Best results saved to: {json_path}", flush=True)
+
+        # save the full provenance archive of every evaluated pipeline
+        self.save_archive(save_dir)
+
+        return
+
+    def save_archive(self, save_dir: str) -> None:
+        """
+        Save the full provenance archive (every evaluated pipeline, with generation,
+        construction, ei, error, genome, and performances) as ``archive.json``.
+
+        Args:
+            save_dir (str): Directory to write ``archive.json`` into.
+        """
+        assert self.eval_archive is not None, "No archive to save. Run evolve() first."
+
+        os.makedirs(save_dir, exist_ok=True)
+        archive_path = os.path.join(save_dir, "archive.json")
+        with open(archive_path, 'w') as f:
+            json.dump(self.eval_archive.to_records(), f, indent=4, default=str)
+        print(f"Archive ({len(self.eval_archive)} entries) saved to: {archive_path}", flush=True)
 
         return

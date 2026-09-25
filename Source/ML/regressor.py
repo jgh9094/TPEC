@@ -1,10 +1,20 @@
 ##########################################################################################
 #
-# Concrete parameter-space classes for the scikit-learn classifiers used by the EAs.
-# Each class derives from Source.Base.model_param_space.ModelParams and only needs to
-# define its own hyperparameter space (__init__), how a genotype is mapped to scikit-learn
-# kwargs (eval_parameters), and its model-type identifier (get_model_type). Random
-# sampling, mutation, and TPE encoding are inherited from ModelParams.
+# Concrete parameter-space classes for the scikit-learn regressors used by the EAs.
+# These are the regression counterparts of Source.ML.classifiers: each class derives from
+# Source.Base.model_param_space.ModelParams and only defines its own hyperparameter space
+# (__init__), how a genotype is mapped to scikit-learn kwargs (eval_parameters), and its
+# model-type identifier (get_model_type). Random sampling, mutation, and TPE encoding are
+# inherited from ModelParams.
+#
+# Differences from the classifier spaces they mirror:
+#   * No ``class_weight`` -- regression targets have no classes.
+#   * Tree ``criterion`` uses the regression split-quality set
+#     ('squared_error', 'absolute_error', 'friedman_mse') instead of ('gini', ...).
+#   * Kernel SVM becomes SVR: it drops ``class_weight``/``decision_function_shape``, gains the
+#     regression-specific ``epsilon`` tube width, and takes no ``random_state`` (SVR is
+#     deterministic, like KNeighbors).
+#   * GradientBoosting uses regression losses and does not depend on n_classes.
 #
 ##########################################################################################
 
@@ -15,15 +25,14 @@ from Source.Base.model_param_space import ModelParams, DataContext, IntParam, Fl
 
 
 @typechecked
-class RandomForestParams(ModelParams):
+class RandomForestRegressorParams(ModelParams):
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
+            'criterion': CatParam(bounds=('squared_error', 'absolute_error', 'friedman_mse'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
+            'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
     def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
@@ -33,7 +42,6 @@ class RandomForestParams(ModelParams):
                 'max_depth': model_params['max_depth'],
                 'max_features': model_params['max_features'],
                 'max_samples': model_params['max_samples'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None,
                 'random_state': random_state}
 
     def get_model_type(self) -> str:
@@ -41,23 +49,22 @@ class RandomForestParams(ModelParams):
 
 
 @typechecked
-class ExtraTreesParams(ModelParams):
+class ExtraTreesRegressorParams(ModelParams):
     """
-    Parameter space for scikit-learn's ExtraTreesClassifier (extremely randomized trees).
+    Parameter space for scikit-learn's ExtraTreesRegressor (extremely randomized trees).
 
-    Mirrors RandomForestParams but intentionally omits ``max_samples``: ExtraTrees is used
-    with its default ``bootstrap=False`` (the whole sample is drawn for every tree and split
-    thresholds are chosen at random), which is what distinguishes it from Random Forest and
-    is the source of its additional stochasticity. ``max_samples`` only applies when
-    ``bootstrap=True`` in scikit-learn, so it is not part of this space.
+    Mirrors RandomForestRegressorParams but intentionally omits ``max_samples``: ExtraTrees is
+    used with its default ``bootstrap=False`` (the whole sample is drawn for every tree and split
+    thresholds are chosen at random), which is what distinguishes it from Random Forest and is the
+    source of its additional stochasticity. ``max_samples`` only applies when ``bootstrap=True`` in
+    scikit-learn, so it is not part of this space.
     """
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
-            'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
+            'criterion': CatParam(bounds=('squared_error', 'absolute_error', 'friedman_mse'), type='cat'),
             'max_depth': IntParam(bounds=(1, 30), type='int'),
-            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
-            'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
+            'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
     def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
@@ -66,7 +73,6 @@ class ExtraTreesParams(ModelParams):
                 'criterion': model_params['criterion'],
                 'max_depth': model_params['max_depth'],
                 'max_features': model_params['max_features'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None,
                 'random_state': random_state}
 
     def get_model_type(self) -> str:
@@ -74,40 +80,48 @@ class ExtraTreesParams(ModelParams):
 
 
 @typechecked
-class KernelSVCParams(ModelParams):
+class KernelSVRParams(ModelParams):
+    """
+    Parameter space for scikit-learn's SVR (kernel Support Vector Regression).
+
+    The regression counterpart of KernelSVCParams: it drops the classification-only
+    ``class_weight`` and ``decision_function_shape``, and adds ``epsilon`` (the width of the
+    epsilon-insensitive tube within which errors incur no penalty). SVR is deterministic and
+    accepts no ``random_state``.
+    """
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
             'C': FloatParam(bounds=(1e-3, 1e2), type='float', log=True),
             'kernel': CatParam(bounds=('linear', 'poly', 'rbf', 'sigmoid'), type='cat'),
             'gamma': FloatParam(bounds=(1e-4, 1e1), type='float', log=True),
             'degree': IntParam(bounds=(2, 5), type='int'),
-            'max_iter': IntParam(bounds=(10000, 100000), type='int'),
-            'class_weight': CatParam(bounds=('None', 'balanced'), type='cat'),
-            'decision_function_shape': CatParam(bounds=('ovo', 'ovr'), type='cat')
+            'epsilon': FloatParam(bounds=(1e-3, 1e0), type='float', log=True),
+            'max_iter': IntParam(bounds=(10000, 100000), type='int')
         })
 
     def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
-        """ Fixes a set of parameters for hard evaluation with scikit-learn. """
+        """
+        Fixes a set of parameters for hard evaluation with scikit-learn.
+
+        SVR is deterministic and accepts no ``random_state``, so the argument is ignored here
+        (kept in the signature for a uniform eval_parameters interface).
+        """
         return {'C': model_params['C'],
                 'kernel': model_params['kernel'],
                 'gamma': model_params['gamma'],
                 'degree': model_params['degree'],
-                'max_iter': model_params['max_iter'],
-                'class_weight': model_params['class_weight'] if model_params['class_weight'] != 'None' else None,
-                'decision_function_shape': model_params['decision_function_shape'],
-                'random_state': random_state}
+                'epsilon': model_params['epsilon'],
+                'max_iter': model_params['max_iter']}
 
     def get_model_type(self) -> str:
-        return "KSVC"
+        return "SVR"
 
 
 @typechecked
-class GradientBoostParams(ModelParams):
+class GradientBoostRegressorParams(ModelParams):
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
-        # 'exponential' loss is only valid for binary targets; only offer it when n_classes == 2.
-        binary_class = ctx.n_classes == 2
         super().__init__(param_space={
-            'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat') if binary_class else CatParam(bounds=('log_loss',), type='cat'),
+            'loss': CatParam(bounds=('squared_error', 'absolute_error', 'huber', 'quantile'), type='cat'),
             'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
@@ -132,7 +146,7 @@ class GradientBoostParams(ModelParams):
 
 
 @typechecked
-class KNeighborsClassifierParams(ModelParams):
+class KNeighborsRegressorParams(ModelParams):
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
             'n_neighbors': IntParam(bounds=(1, 300), type='int'),
@@ -146,7 +160,7 @@ class KNeighborsClassifierParams(ModelParams):
         """
         Fixes a set of parameters for hard evaluation with scikit-learn.
 
-        KNeighborsClassifier is deterministic and accepts no ``random_state``, so the argument
+        KNeighborsRegressor is deterministic and accepts no ``random_state``, so the argument
         is ignored here (kept in the signature for a uniform eval_parameters interface).
         """
         return {'n_neighbors': model_params['n_neighbors'],
@@ -160,7 +174,7 @@ class KNeighborsClassifierParams(ModelParams):
 
 
 @typechecked
-class MLPClassifierParams(ModelParams):
+class MLPRegressorParams(ModelParams):
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
             'layer_1': IntParam(bounds=(10, 100), type='int'),
@@ -191,7 +205,10 @@ class MLPClassifierParams(ModelParams):
         return "MLP"
 
 
-CLASSIFIERS = (
-    RandomForestParams, ExtraTreesParams, KernelSVCParams,
-    GradientBoostParams, KNeighborsClassifierParams, MLPClassifierParams,
+# Registry of the regressor parameter-space classes, mirroring Source.ML.classifiers.CLASSIFIERS.
+# Order matches the classifier registry (RF, ET, kernel SVM, GB, KNN, MLP) so the CASH predictor
+# node offers the same six model families for regression as it does for classification.
+REGRESSORS = (
+    RandomForestRegressorParams, ExtraTreesRegressorParams, KernelSVRParams,
+    GradientBoostRegressorParams, KNeighborsRegressorParams, MLPRegressorParams,
 )

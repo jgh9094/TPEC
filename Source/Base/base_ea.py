@@ -66,6 +66,8 @@ class BaseEA(ABC):
         self.pop_size = pop_size
         self.cores = cores
         self.classification = classification
+        # human-readable name of the maximized metric, for task-aware logging (AUC vs R^2)
+        self.metric_name = "AUC" if classification else "R2"
         self.rng = np.random.default_rng(seed)
 
         # ea specific variables
@@ -89,6 +91,9 @@ class BaseEA(ABC):
         self.cv_splits: Optional[List[Tuple]] = None
         self.categorical_cols: Optional[List[str]] = None
         self.numerical_cols: Optional[List[str]] = None
+        # number of cross-validation folds; unset until load_data_pd assigns it (defaults to 5
+        # there). Kept None here so load_data_pd can assert it has not already been set.
+        self.n_folds: Optional[int] = None
 
         return
 
@@ -97,7 +102,8 @@ class BaseEA(ABC):
                      target_label: str,
                      train_p: float,
                      one_hot_cols: Optional[List[str]] = None,
-                     scalar_cols: Optional[List[str]] = None) -> None:
+                     scalar_cols: Optional[List[str]] = None,
+                     n_folds: int = 5) -> None:
         """
         Loads a dataset from an in-memory pandas DataFrame and applies preprocessing.
 
@@ -113,6 +119,8 @@ class BaseEA(ABC):
             train_p (float): Proportion of the dataset to use for training.
             one_hot_cols (Optional[List[str]]): Feature columns to one-hot-encode.
             scalar_cols (Optional[List[str]]): Feature columns to scale via StandardScaler.
+            n_folds (int): Number of cross-validation folds to build over the training set
+                (StratifiedKFold for classification, KFold for regression). Defaults to 5.
         """
         # normalize the column lists so empty/None are treated the same
         one_hot_cols = list(one_hot_cols) if one_hot_cols else []
@@ -120,6 +128,11 @@ class BaseEA(ABC):
 
         # quick sanity checks
         assert 0.0 < train_p < 1.0, "train_p must be between 0 and 1 (exclusive)."
+        assert n_folds >= 2, "n_folds must be at least 2 for cross-validation."
+        # load_data_pd wires up the (immutable) CV structure, so it must run exactly once: n_folds
+        # is None until set here, and a second call would silently rebuild the folds.
+        assert self.n_folds is None, "n_folds has already been set; load_data_pd must be called only once."
+        self.n_folds = n_folds
         assert target_label in data.columns, f"Target label '{target_label}' not found in DataFrame columns."
 
         feature_cols = [col for col in data.columns if col != target_label]
@@ -165,12 +178,13 @@ class BaseEA(ABC):
             X, y, train_size=train_p, random_state=self.seed, shuffle=True, stratify=stratify
         )
 
-        # Generate a 5-fold CV split over the training set (indices per fold). StratifiedKFold for
-        # classification (balanced class proportions per fold); plain KFold for regression.
+        # Generate an ``n_folds``-fold CV split over the training set (indices per fold).
+        # StratifiedKFold for classification (balanced class proportions per fold); plain KFold
+        # for regression.
         if self.classification:
-            splitter = skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed)
+            splitter = skl.model_selection.StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=self.seed)
         else:
-            splitter = skl.model_selection.KFold(n_splits=5, shuffle=True, random_state=self.seed)
+            splitter = skl.model_selection.KFold(n_splits=self.n_folds, shuffle=True, random_state=self.seed)
         self.cv_splits = list(splitter.split(self.X_train, self.y_train))
 
         # prepare CV fold data
@@ -189,9 +203,10 @@ class BaseEA(ABC):
         (X_train, y_train, X_val, y_val) are placed in the Ray object store individually
         so that a single fold can be loaded by a dedicated per-fold evaluation task.
         """
+        assert self.n_folds is not None, "n_folds must be set (via load_data_pd) before preparing folds."
         # generate each fold's train and validation sets with preprocessing
         cv_fold_refs = []
-        for fold_idx in range(5):
+        for fold_idx in range(self.n_folds):
             X_train_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][0]].reset_index(drop=True)
             X_val_fold_raw = self.X_train.iloc[self.cv_splits[fold_idx][1]].reset_index(drop=True)
 
