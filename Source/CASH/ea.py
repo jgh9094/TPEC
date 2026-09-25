@@ -1114,6 +1114,29 @@ class EA(BaseEA):
         csv_path = os.path.join(checkpoint_dir, "checkpoints.csv")
         pd.DataFrame(self.checkpoints).to_csv(csv_path, index=False)
 
+        # snapshot of the best-so-far result at this many candidates considered, mirroring the
+        # best_results.json schema so progress can be tracked generation by generation. The budget
+        # index N in the filename is the total number of candidates considered so far -- the running
+        # sum of population size over generations -- which is exactly the archive length (every
+        # evaluated pipeline, including redundant genomes, is recorded there). This is NOT
+        # ``hard_eval_count`` (distinct genomes actually fitted), which is <= candidates considered.
+        candidates_considered = len(self.eval_archive)
+        result_snapshot = {
+            "generation": generation,
+            "candidates_considered": candidates_considered,
+            "hard_evals": self.hard_eval_count,
+            "task_id": self.task_id,
+            "seed": self.seed,
+            "architecture": best_individual.get_architecture(),
+            "train_accuracy": float(train_score),
+            "validation_accuracy": float(best_val),
+            "test_accuracy": float(test_score),
+            "best_pipeline": best_individual.get_genotype(),
+        }
+        json_path = os.path.join(checkpoint_dir, f"results_eval_{candidates_considered}.json")
+        with open(json_path, 'w') as f:
+            json.dump(result_snapshot, f, indent=4)
+
         # record this selection so the final evaluation returns exactly the last checkpoint
         self.best_result = {
             "architecture": best_individual.get_architecture(),
@@ -1124,7 +1147,8 @@ class EA(BaseEA):
         }
 
         print(f"Checkpoint (Gen {generation}) - Val {self.metric_name}: {self.best_perf:.4f}, "
-              f"Train {self.metric_name}: {train_score:.4f}, Test {self.metric_name}: {test_score:.4f}", flush=True)
+              f"Train {self.metric_name}: {train_score:.4f}, Test {self.metric_name}: {test_score:.4f} "
+              f"-> {json_path}", flush=True)
 
         return
 

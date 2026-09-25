@@ -749,10 +749,16 @@ class EA(BaseEA):
         csv_path = os.path.join(checkpoint_dir, "checkpoints.csv")
         pd.DataFrame(self.checkpoints).to_csv(csv_path, index=False)
 
-        # snapshot of the best-so-far result at this many total hard evaluations, mirroring
-        # the best_results.json schema so progress can be tracked generation by generation
+        # snapshot of the best-so-far result at this many candidates considered, mirroring the
+        # best_results.json schema so progress can be tracked generation by generation. The budget
+        # index N in the filename is the total number of candidates considered so far -- the running
+        # sum of population size over generations -- which is exactly the archive length (every
+        # evaluated candidate, including redundant genomes, is recorded there). This is NOT
+        # ``hard_eval_count`` (distinct genomes actually fitted), which is <= candidates considered.
+        candidates_considered = len(self.eval_archive)
         result_snapshot = {
             "generation": generation,
+            "candidates_considered": candidates_considered,
             "hard_evals": self.hard_eval_count,
             "task_id": self.task_id,
             "model_type": self.param_space.get_model_type(),
@@ -762,7 +768,7 @@ class EA(BaseEA):
             "test_accuracy": float(test_score),
             "best_params": best_individual.get_genotype(),
         }
-        json_path = os.path.join(checkpoint_dir, f"results_eval_{self.hard_eval_count}.json")
+        json_path = os.path.join(checkpoint_dir, f"results_eval_{candidates_considered}.json")
         with open(json_path, 'w') as f:
             json.dump(result_snapshot, f, indent=4)
 
