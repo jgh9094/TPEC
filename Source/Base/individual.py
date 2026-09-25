@@ -1,22 +1,21 @@
+from abc import ABC, abstractmethod
 from typeguard import typechecked
-from typing import Dict, Any
+from typing import Any, Optional, Tuple
 import copy as cp
 
 @typechecked
-class Individual:
+class Individual(ABC):
     """
-    This class encapsulates a set of hyperparameters (the "params") and stores additional information,
-    such as the performance (accuracy), expected improvement (ei), and cross-validation training score (cv_train_score).
-    """
-    def __init__(self, params: Dict[str, Any], model_type: str):
-        """
-        Parameters:
-            param_space (ModelParams): This object encapsulates the parameter space and allows you to sample from it.
-            performance (float): Objective function value, or the cross-validation score.
-            ei (float): Expected improvement score.
-            cv_train_score (float): Final accuracy on the training set.
-        """
+    Abstract base class for an individual in the search.
 
+    An Individual encapsulates a genotype (e.g., hyperparameter values or an ML
+    pipeline configuration) together with additional information such as the
+    performance (train/validation/test) and expected improvement (ei).
+
+    Subclasses are responsible for defining how the genotype is represented and
+    retrieved by implementing :meth:`get_genotype` and :meth:`__repr__`.
+    """
+    def __init__(self):
         # train_performance
         self.train_performance = None
         # validation performance
@@ -25,18 +24,30 @@ class Individual:
         self.test_performance = None
         # expected improvement
         self.ei = None
-        # upper confidence bound
-        self.ucb = None
-        # probability of improvement
-        self.pi = None
-
-        # Initialize params, a set of random hyperparameters ({parameter_name: value})
-        self.params: Dict[str, Any] = params
-        self.model_type = model_type
+        # how this individual was constructed ("random" or "tpe" offspring construction); set by
+        # the EA at creation time and consumed when the individual is recorded in the archive
+        self.construction: Optional[str] = None
+        # which variation operator produced this offspring ("mutation", "crossover", or
+        # "crossover_mutation"); set by the EA at creation time and consumed by the archive.
+        # None for the initial population (not produced by a variation operator).
+        self.operation: Optional[str] = None
+        # archive ids of the two parents that produced this offspring (identical for a
+        # mutation-only offspring; two, possibly-equal, ids for a crossover offspring). None for
+        # the initial population, which has no parents.
+        self.parent_ids: Optional[Tuple[int, int]] = None
+        # id assigned to this individual when it is recorded in the provenance archive; lets a
+        # later offspring reference this individual as a parent by its archive id.
+        self.archive_id: Optional[int] = None
+        # whether any CV fold errored while evaluating this individual; set during evaluation
+        self.eval_error: Optional[bool] = None
+        # genotype for the individual (e.g., hyperparameter values or ML pipeline configuration)
+        self.genotype = None
         return
 
-    def __repr__(self):
-        return f"Individual(params={self.params}"
+    def get_genotype(self) -> Any:
+        """Return the individual's genotype."""
+        assert self.genotype is not None, "Genotype has not been set yet."
+        return cp.deepcopy(self.genotype)
 
     def set_train_performance(self, f: float) -> None:
         assert self.train_performance is None, "Train performance has already been set."
@@ -66,26 +77,11 @@ class Individual:
         assert self.ei is None, "Expected Improvement has already been set."
         self.ei = ei
 
-    def set_ucb(self, ucb: float) -> None:
-        assert self.ucb is None, "Upper Confidence Bound has already been set."
-        self.ucb = ucb
-
-    def get_ucb(self) -> float:
-        assert self.ucb is not None, "Upper Confidence Bound has not been set yet."
-        return self.ucb
-
-    def set_pi(self, pi: float) -> None:
-        assert self.pi is None, "Probability of Improvement has already been set."
-        self.pi = pi
-
-    def get_pi(self) -> float:
-        assert self.pi is not None, "Probability of Improvement has not been set yet."
-        return self.pi
-
     def get_ei(self) -> float:
         assert self.ei is not None, "Expected Improvement has not been set yet."
         return self.ei
 
-    def get_params(self) -> Dict[str, Any]:
-        # return a deep copy to avoid accidental modifications
-        return cp.deepcopy(self.params)
+    @abstractmethod
+    def __repr__(self) -> str:
+        """Return a string representation of the individual."""
+        raise NotImplementedError

@@ -1,9 +1,9 @@
 import numpy as np
+from abc import ABC, abstractmethod
 from .individual import Individual
-from .model_param_space import ModelParams
 from collections import Counter
 from scipy.stats import gaussian_kde
-from typing import Tuple, Dict, List, Union, Iterable, Any
+from typing import Tuple, Dict, List, Union, Iterable, Optional, Any
 from typeguard import typechecked
 
 @typechecked
@@ -139,88 +139,77 @@ class CategoricalPMF:
         return samples.tolist()
 
 @typechecked
-class TPE:
+class ParamGroupModel:
     """
-    Tree-structured Parzen Estimator (TPE) Solver for hyperparameter optimization.
-    This class supports both categorical and numeric parameters,
-    and uses kernel density estimation (KDE) and probability mass functions (PMFs)
-    to model the likelihood of good and bad configurations.
+    Density models for ONE group of observations over a flat parameter sub-space.
+
+    Bundles an optional multivariate Gaussian KDE pair over the group's numeric parameters with
+    an optional smoothed PMF pair per categorical/bool parameter. Any component may be
+    unavailable when there is not enough evidence to fit it (too few observations for the KDE, or
+    a group with no observations); ``log_ratio`` simply skips unavailable components, which makes
+    their contribution neutral (log-ratio 0) rather than rewarding or penalizing the candidate.
+
+    Used both for a flat single-model space (one global group) and, in the pipeline-aware CASH
+    variant, for each ``(architecture, node)`` group. Build instances via
+    ``BaseTPE._fit_param_group`` rather than directly.
+    """
+    def __init__(self, numeric_names: List[str],
+                 multi_l: Optional[MultivariateKDE], multi_g: Optional[MultivariateKDE],
+                 cat_l: Dict[str, CategoricalPMF], cat_g: Dict[str, CategoricalPMF]):
+        self.numeric_names = numeric_names  # order of dimensions in the numeric KDEs
+        self.multi_l = multi_l              # good numeric KDE (None if unavailable)
+        self.multi_g = multi_g              # bad numeric KDE (None if unavailable)
+        self.cat_l = cat_l                  # {param: good PMF}
+        self.cat_g = cat_g                  # {param: bad PMF}
+
+    def has_evidence(self) -> bool:
+        """True if at least one density model (numeric KDE or any categorical PMF) was fit."""
+        return (self.multi_l is not None and self.multi_g is not None) or bool(self.cat_l)
+
+    def log_ratio(self, params: Dict[str, Any]) -> float:
+        """
+        Sum of available good/bad log-density ratios for a candidate's parameter values.
+
+        The numeric KDEs (if available) contribute one joint ``log l - log g`` term; each
+        categorical PMF contributes its own ``log l - log g``. Both the KDE ``pdf`` and PMF
+        ``pmf`` floor their outputs at a small epsilon, so the logs are always finite.
+        """
+        score = 0.0
+        if self.multi_l is not None and self.multi_g is not None and self.numeric_names:
+            num_vals = [params[name] for name in self.numeric_names]
+            # pdf returns a length-1 array for a single point; take the scalar for the log.
+            l_num = float(self.multi_l.pdf(num_vals)[0])
+            g_num = float(self.multi_g.pdf(num_vals)[0])
+            score += float(np.log(l_num) - np.log(g_num))
+        for name, pmf_l in self.cat_l.items():
+            score += float(np.log(pmf_l.pmf(params[name])) - np.log(self.cat_g[name].pmf(params[name])))
+        return score
+
+
+@typechecked
+class BaseTPE(ABC):
+    """
+    Abstract base for the Tree-structured Parzen Estimator (TPE) surrogate used to guide the EA.
+
+    Holds only the flavor-independent machinery: the good/bad split and the candidate-ranking
+    helpers. Ranking is driven by the abstract ``score_candidates`` acquisition hook (higher =
+    more promising), so the concrete density modeling lives entirely in a subclass:
+
+      * ``Source.HPO.tpe.HPO_TPE`` models a single flat ``ModelParams`` space (one global
+        multivariate KDE + per-categorical PMFs).
+      * the planned pipeline-aware CASH variant models the joint pipeline architecture plus
+        architecture-conditioned parameter models (see Source/CASH/TPE_pipeline_EA_plan.md).
+
+    Both fit good/bad density models from evaluated history and score EA-generated candidates by
+    how strongly they resemble historically good rather than bad solutions.
     """
     def __init__(self, gamma: float):
         """
         Parameters:
             gamma (float): Fraction of samples considered "good".
         """
-
+        assert 0.0 < gamma < 1.0, "gamma must be in (0, 1)"
         self.gamma = gamma # splitting parameter
-
-        # Fitted distributions
-        self.multi_l: MultivariateKDE = None # good, numeric
-        self.multi_g: MultivariateKDE = None  # bad, numeric
-        self.cat_l: Dict[str, CategoricalPMF] = {} # good, categorical
-        self.cat_g: Dict[str, CategoricalPMF] = {} # bad, categorical
-
-        # Parameter order (set during fit, used during sample to ensure consistency)
-        self.numeric_param_names: List[str] = []
-
-    def sample(self, num_samples: int, param_space: ModelParams, rng: np.random.Generator) -> List[Dict]:
-        """
-        Returns 'num_samples' Individuals.
-        For each Individual's params, sample from the "good" MultivariateKDE and CategoricalPMFs separately,
-        then reassemble into a full set of hyperparameters.
-        """
-        categorical_params = {
-            **param_space.get_params_by_type('cat'),
-            **param_space.get_params_by_type('bool')
-        }
-
-        # Validate that fitted models exist for parameter types present in the space
-        if self.numeric_param_names:
-            assert self.multi_l is not None and self.multi_g is not None, \
-                "MultivariateKDE models must be fitted when numeric parameters exist."
-
-        if categorical_params:
-            assert len(self.cat_l) > 0 and len(self.cat_g) > 0, \
-                "CategoricalPMF models must be fitted when categorical parameters exist."
-
-        # Sample from the good numeric distribution
-        multi_samples = self.multi_l.sample(rng=rng, n_samples=num_samples) # shape (dimensions, n_samples)
-        assert multi_samples.shape[0] == len(self.numeric_param_names)
-        assert multi_samples.shape[1] == num_samples
-
-        # Align numeric parameter names to each dimension (use stored order from fit())
-        params = {
-            name: list(multi_samples[i])
-            for i, name in enumerate(self.numeric_param_names)
-        }
-
-        # Make sure parameters are rounded if int and within bounds
-        for name, info in param_space.param_space.items():
-            if info["type"] == "int":
-                params[name] = [
-                    int(round(np.clip(val, *info['bounds'])))
-                    for val in params[name]
-                    ]
-            if info["type"] == "float":
-                params[name] = [
-                    float(np.clip(val, *info['bounds']))
-                    for val in params[name]
-                ]
-
-        # Sample from the good categorical distribution
-        for name, dist in self.cat_l.items():
-            params[name] = dist.sample(rng=rng, n_samples=num_samples)
-
-        assert all(len(v) == num_samples for v in params.values())
-
-        samples: List[Dict] = []
-        for i in range(num_samples):
-            # Map name to a single value
-            ind_params = {name: params[name][i] for name in param_space.param_space}
-            samples.append(ind_params)
-
-        assert(len(samples) == num_samples)
-        return samples
 
     def split_samples(self, samples: List[Individual]) -> Tuple[List[Individual], List[Individual]]:
         """
@@ -243,115 +232,18 @@ class TPE:
         bad_samples = samples[split_idx:]
         return good_samples, bad_samples
 
-    def fit(self, samples: List[Individual], param_space: ModelParams, rng: np.random.Generator) -> None:
+    def suggest_one(self, candidates: List[Dict], rng: np.random.Generator) -> int:
         """
-        Fit probabilistic models (KDEs and PMFs) to the good and bad sample groups.
+        Suggest the top candidate based on the acquisition score.
 
         Parameters:
-        """
-        good_samples, bad_samples = self.split_samples(samples)
-
-        numeric_params = {
-            **param_space.get_params_by_type('int'),
-            **param_space.get_params_by_type('float'),
-        }
-        categorical_params = {
-            **param_space.get_params_by_type('cat'),
-            **param_space.get_params_by_type('bool')
-        }
-
-        # Store parameter order for consistency between fit() and sample()
-        self.numeric_param_names = list(numeric_params.keys())
-
-        # For each sample set, extract values of numeric hyperparameters
-        # Format shape (n_params, n_samples): [[value11, value12,...], [value21, value22, ...], ...]
-        # Each parameter has its own row
-        good_num_samples = np.array([[o.get_params()[param_name] for o in good_samples]
-                            for param_name in self.numeric_param_names])
-        bad_num_samples = np.array([[o.get_params()[param_name] for o in bad_samples]
-                            for param_name in self.numeric_param_names])
-
-        # Fit Multivariate KDEs
-        self.multi_l = MultivariateKDE(good_num_samples, rng)
-        self.multi_g = MultivariateKDE(bad_num_samples, rng)
-
-        # Fit independent PMFs
-        self.cat_l.clear()
-        self.cat_g.clear()
-        # Construct 2 PMFs (good and bad) for each categorical parameter
-        # Format: {param_name: CategoricalPMF}
-        self.cat_l = {
-            param_name: CategoricalPMF(
-                # Extract categorical values from samples in (d, n) format
-                values = [o.get_params()[param_name] for o in good_samples],
-                all_categories = info["bounds"]
-            )
-            for param_name, info in categorical_params.items()
-        }
-
-        self.cat_g = {
-            param_name : CategoricalPMF(
-                values = [o.get_params()[param_name] for o in bad_samples],
-                all_categories = info["bounds"]
-            )
-            for param_name, info in categorical_params.items()
-        }
-        return
-
-    def expected_improvement(self, param_space: ModelParams, candidates: List[Dict]) -> np.ndarray:
-        """
-        Compute the expected improvement (EI) for a list of candidate individuals.
-
-        Parameters:
-        - candidates: List[Individual]
-            Candidate individuals to evaluate
-
-        Returns an array of EI scores, one per candidate.
-        """
-        ei_scores = []
-
-        numeric_params = {
-            **param_space.get_params_by_type('int'),
-            **param_space.get_params_by_type('float'),
-        }
-
-        for params in candidates:
-            # Numeric contribution (multivariate)
-            if numeric_params:
-                num_vals = [params[param_name] for param_name in numeric_params] # (, d_num)
-                # 'num_vals' gets reshaped into (d_num, 1) here
-                l_num = float(self.multi_l.pdf(num_vals)) # a single density value
-                g_num = float(self.multi_g.pdf(num_vals))
-            else: # If no numeric parameters exist, no contribution
-                l_num = g_num = 1.0
-
-            # Categorical contribution (product of per-dim PMFs)
-            l_cat = g_cat = 1.0
-            # PMFs are univariate
-            for param_name, pmf_l in self.cat_l.items():
-                lx = pmf_l.pmf(params[param_name]) # a single density
-                gx = self.cat_g[param_name].pmf(params[param_name])
-                l_cat *= lx
-                g_cat *= gx
-
-            # Floor the denominator to avoid division by zero while preserving ranking
-            l_total = l_num * l_cat
-            g_total = max(g_num * g_cat, 1e-12)
-            ei_scores.append(l_total / g_total)
-        return np.asarray(ei_scores)
-
-    def suggest_one(self, param_space: ModelParams, candidates: List[Dict], rng: np.random.Generator) -> int:
-        """
-        Suggest the top candidate based on expected improvement.
-
-        Parameters:
-            candidates (List[Individual]): Candidate individuals to rank.
-            num_top_cand (int): Number of top candidates to return.
+            candidates (List[Dict]): Candidate parameter dictionaries to rank.
+            rng (np.random.Generator): Random number generator for tie-breaking.
 
         Returns:
             int: Index of the best candidate in the original candidates list.
         """
-        scores = self.expected_improvement(param_space, candidates)
+        scores = self.score_candidates(candidates)
 
         # find max score from scores
         best_index = int(np.argmax(scores))
@@ -362,13 +254,12 @@ class TPE:
         # randomly select one of the best indices
         return int(rng.choice(best_indices))
 
-    def suggest_top_k(self, param_space: ModelParams, candidates: List[Dict], k: int, rng: np.random.Generator) -> List[int]:
+    def suggest_top_k(self, candidates: List[Dict], k: int, rng: np.random.Generator) -> List[int]:
         """
-        Suggest the top k candidates based on expected improvement scores.
+        Suggest the top k candidates based on the acquisition score.
         Handles ties by randomly sampling among candidates with equal scores.
 
         Parameters:
-            param_space (ModelParams): The parameter space definition.
             candidates (List[Dict]): Candidate parameter dictionaries to rank.
             k (int): Number of top candidates to return.
             rng (np.random.Generator): Random number generator for tie-breaking.
@@ -379,7 +270,7 @@ class TPE:
         if k > len(candidates):
             k = len(candidates)
 
-        scores = self.expected_improvement(param_space, candidates)
+        scores = self.score_candidates(candidates)
 
         # Create list of (index, score) tuples
         indexed_scores = list(enumerate(scores))
@@ -412,3 +303,67 @@ class TPE:
         ).tolist()
 
         return candidates_above_threshold + sampled_at_threshold
+
+    def _fit_param_group(self, good_param_dicts: List[Dict[str, Any]], bad_param_dicts: List[Dict[str, Any]],
+                         param_specs: Dict[str, Any], rng: np.random.Generator) -> Optional[ParamGroupModel]:
+        """
+        Fit the density models for one group of observations over a flat parameter sub-space.
+
+        ``param_specs`` is a ``{param_name: {"type": ..., "bounds": ...}}`` mapping (a
+        ``ModelParams.param_space``, or one node/component's parameter dict in the pipeline
+        space). Numeric ('int'/'float') parameters are modeled jointly with a MultivariateKDE
+        pair, but only when BOTH groups have strictly more observations than numeric dimensions
+        (the KDE's ``n > d`` requirement); if the KDE is singular even after jitter it is left
+        unavailable. Categorical ('cat'/'bool') parameters get a smoothed PMF pair whenever both
+        groups are non-empty.
+
+        Returns a ``ParamGroupModel`` carrying whatever evidence could be fit, or ``None`` if no
+        evidence at all was available (so callers can skip storing it).
+        """
+        numeric_names = [n for n, s in param_specs.items() if s["type"] in ("int", "float")]
+        cat_names = [n for n, s in param_specs.items() if s["type"] in ("cat", "bool")]
+
+        multi_l = multi_g = None
+        if numeric_names:
+            d = len(numeric_names)
+            # MultivariateKDE requires strictly more samples than dimensions in each group.
+            if len(good_param_dicts) > d and len(bad_param_dicts) > d:
+                good_arr = np.array([[gd[n] for gd in good_param_dicts] for n in numeric_names], dtype=float)
+                bad_arr = np.array([[bd[n] for bd in bad_param_dicts] for n in numeric_names], dtype=float)
+                try:
+                    multi_l = MultivariateKDE(good_arr, rng)
+                    multi_g = MultivariateKDE(bad_arr, rng)
+                except ValueError:
+                    # Singular/degenerate even after jitter -> leave numeric evidence unavailable.
+                    multi_l = multi_g = None
+
+        cat_l: Dict[str, CategoricalPMF] = {}
+        cat_g: Dict[str, CategoricalPMF] = {}
+        if cat_names and good_param_dicts and bad_param_dicts:
+            for n in cat_names:
+                bounds = param_specs[n]["bounds"]
+                cat_l[n] = CategoricalPMF([gd[n] for gd in good_param_dicts], bounds)
+                cat_g[n] = CategoricalPMF([bd[n] for bd in bad_param_dicts], bounds)
+
+        model = ParamGroupModel(numeric_names, multi_l, multi_g, cat_l, cat_g)
+        return model if model.has_evidence() else None
+
+    @abstractmethod
+    def fit(self, *args, **kwargs):
+        """
+        Fit the good/bad density models from evaluated history.
+
+        The concrete signature and return type are flavor-specific (see subclass docs): the flat
+        HPO variant takes ``(samples, param_space, rng)`` and returns ``None``; the pipeline-aware
+        variant returns a ``bool`` indicating whether usable architecture-level guidance exists.
+        """
+        raise NotImplementedError("Subclasses must implement the 'fit' method.")
+
+    @abstractmethod
+    def score_candidates(self, candidates: List[Dict]) -> np.ndarray:
+        """
+        Return one acquisition score per candidate; higher means more characteristic of
+        historically good (rather than bad) configurations. ``suggest_one`` and
+        ``suggest_top_k`` rank candidates by this score.
+        """
+        raise NotImplementedError("Subclasses must implement the 'score_candidates' method.")

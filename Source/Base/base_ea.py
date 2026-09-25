@@ -1,7 +1,7 @@
 ##########################################################################################
 #
 # Abstract base class for evolutionary algorithm (EA) optimization of hyperparameters.
-# All EA implementations (CASH, HPO) should derive from this class.
+# All EA implementations (CASH, HPO) are derived from this class.
 #
 ##########################################################################################
 
@@ -9,21 +9,13 @@ import numpy as np
 import pandas as pd
 import ray
 import sklearn as skl
-import copy as cp
 from abc import ABC, abstractmethod
 
 from typeguard import typechecked
-from typing import List, Dict, Any, Optional, Tuple
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from typing import List, Any, Optional, Tuple
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import roc_auc_score
 
 from Source.Base.individual import Individual
-from Source.Base import model_param_space
 
 
 @typechecked
@@ -38,7 +30,9 @@ class BaseEA(ABC):
                  pop_size: int,
                  cores: int,
                  mut_prob: float,
-                 mut_var: float) -> None:
+                 mut_var: float,
+                 crossover_prob: float,
+                 classification: bool) -> None:
         """
         Initializes the base EA class with common parameters.
 
@@ -46,9 +40,18 @@ class BaseEA(ABC):
             seed (int): Random seed for reproducibility.
             pop_size (int): Population size for the evolutionary algorithm.
             cores (int): Number of CPU cores to use for parallel processing.
-            mut_prob (float): Mutation probability for the evolutionary algorithm.
+            mut_prob (float): Per-parameter mutation probability for the mutation operator.
             mut_var (float): Mutation variance for the evolutionary algorithm.
-            save_directory (str): Directory to save results.
+            crossover_prob (float): Probability that an offspring is generated via crossover;
+                the remaining ``1.0 - crossover_prob`` are generated via mutation. Defaults to
+                0.0 (all mutation, no crossover).
+            classification (bool): Whether the task is classification (True) or regression
+                (False). Controls how ``load_data_pd`` splits the data: classification derives
+                class ``labels`` and uses a stratified train/test split + StratifiedKFold;
+                regression has no classes, so it uses a plain shuffled split + KFold and leaves
+                ``labels``/``binary_classification`` as None. For regression the target ``y`` is
+                used as-is -- callers must pre-scale/transform it as needed (some estimators, e.g.
+                an MLPRegressor with solver='sgd', diverge on large-magnitude unscaled targets).
         """
         # quick sanity checks
         assert seed >= 0, "Seed must be a non-negative integer."
@@ -56,21 +59,21 @@ class BaseEA(ABC):
         assert cores > 0, "Number of cores must be a positive integer."
         assert 0.0 <= mut_var, "Mutation variance must be non-negative."
         assert 0.0 <= mut_prob <= 1.0, "Mutation probability must be between 0 and 1."
-
-        # global parameters for history tracking
-        self.SOLUTION_VALIDATION_SCORE = 'SOLUTION_VALIDATION_SCORE'
-        self.SOLUTION_TRAIN_SCORE = 'SOLUTION_TRAIN_SCORE'
+        assert 0.0 <= crossover_prob <= 1.0, "Crossover probability must be between 0 and 1."
 
         # save the parameters
         self.seed = seed
         self.pop_size = pop_size
         self.cores = cores
+        self.classification = classification
         self.rng = np.random.default_rng(seed)
 
         # ea specific variables
         self.population: List[Individual] = []
         self.mut_prob = mut_prob
         self.mut_var = mut_var
+        # probability an offspring is produced by crossover vs. mutation
+        self.crossover_prob = crossover_prob
 
         # variables tracked during the optimization process
         self.total_evaluations = 0
@@ -139,20 +142,36 @@ class BaseEA(ABC):
         # print dimesionality of X
         print(f"Loaded dataset with {X.shape[0]} rows and {X.shape[1]} features.")
 
-        # make a list of all unique classes in the target variable and determine problem type
-        self.labels = np.unique(y)
-        self.binary_classification = bool(len(self.labels) == 2)
+        # Determine problem type. Classification derives its class labels (used to pick the legal
+        # multi-class ROC AUC labels and to stratify the splits); regression has no classes, so
+        # labels/binary_classification stay None and the target is treated as continuous.
+        if self.classification:
+            self.labels = np.unique(y)
+            self.binary_classification = bool(len(self.labels) == 2)
+            print(f"Classification task. Unique classes in target variable '{target_label}': {self.labels}")
+        else:
+            self.labels = None
+            self.binary_classification = None
+            y_numeric = np.asarray(y, dtype=float)
+            print(f"Regression task. Target variable '{target_label}' treated as continuous "
+                  f"(min={y_numeric.min():.4g}, max={y_numeric.max():.4g}). "
+                  f"NOTE: the target is used as-is -- pre-scale/transform it if your model needs it.")
 
-        # print the unique classes
-        print(f"Unique classes in target variable '{target_label}': {self.labels}")
-
-        # generate an initial train-test split for the evolutionary algorithm (train_p is the proportion of the dataset to use for training)
+        # Generate an initial train-test split (train_p is the proportion used for training).
+        # Classification stratifies on the class labels; regression cannot stratify a continuous
+        # target, so it uses a plain shuffled split.
+        stratify = y if self.classification else None
         self.X_train, self.X_test, self.y_train, self.y_test = skl.model_selection.train_test_split(
-            X, y, train_size=train_p, random_state=self.seed, shuffle=True, stratify=y
+            X, y, train_size=train_p, random_state=self.seed, shuffle=True, stratify=stratify
         )
 
-        # generate a 5-fold cross-validation split for the evolutionary algorithm based on the training set and store the indices for each fold
-        self.cv_splits = list(skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed).split(self.X_train, self.y_train))
+        # Generate a 5-fold CV split over the training set (indices per fold). StratifiedKFold for
+        # classification (balanced class proportions per fold); plain KFold for regression.
+        if self.classification:
+            splitter = skl.model_selection.StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed)
+        else:
+            splitter = skl.model_selection.KFold(n_splits=5, shuffle=True, random_state=self.seed)
+        self.cv_splits = list(splitter.split(self.X_train, self.y_train))
 
         # prepare CV fold data
         self._prepare_cv_folds()
@@ -197,22 +216,42 @@ class BaseEA(ABC):
 
         return
 
+    @abstractmethod
     def _build_preprocessor(self) -> ColumnTransformer:
-            """
-            Builds a ColumnTransformer that scales the numerical columns and one-hot-encodes
-            the categorical columns. Transformations whose column list is empty are omitted so
-            that only the requested operations are applied; all remaining columns pass through.
+        """
+        Builds the base ColumnTransformer applied to every fold's training partition (and the
+        final train/test split) BEFORE the evolved model/pipeline sees the data. Must be
+        implemented by derived classes, since the appropriate baseline preprocessing differs by
+        EA setup:
 
-            Returns:
-                ColumnTransformer: The configured preprocessor.
-            """
-            transformers = []
-            if self.numerical_cols:
-                transformers.append(('num', StandardScaler(), self.numerical_cols))
-            if self.categorical_cols:
-                transformers.append(('cat', OneHotEncoder(drop=None, sparse_output=False, handle_unknown='ignore'), self.categorical_cols))
+          * HPO fits a single bare estimator, so the preprocessor must fully numericize AND scale
+            the data (StandardScaler on the numeric columns + one-hot on the categoricals).
+          * CASH evolves its own ``feature_scaling`` node, so its preprocessor only needs to make
+            the data numeric (one-hot the categoricals); scaling is left to the evolved pipeline.
 
-            return ColumnTransformer(transformers=transformers, remainder='passthrough')
+        Returns:
+            ColumnTransformer: The configured preprocessor.
+        """
+        pass
+
+    def smallest_cv_train_size(self) -> int:
+        """
+        Returns the number of rows in the smallest cross-validation training fold.
+
+        Parameter bounds that scale with the number of training rows (e.g. QuantileTransformer's
+        ``n_quantiles`` or Nystroem's ``n_components``) should be capped by what a model actually
+        sees while being cross-validated, not by the full training-set size ``X_train``. Since each
+        model is fit on ``k - 1`` folds during CV, the honest cap is the smallest such training
+        partition; sizing the search space to it means proposed values are always realizable on
+        every fold (no scikit-learn clip warnings, no wasted components).
+
+        Requires ``load_data_pd`` to have been called (``cv_splits`` populated).
+
+        Returns:
+            int: The minimum training-partition size across the CV folds.
+        """
+        assert self.cv_splits is not None, "load_data_pd must be called before smallest_cv_train_size."
+        return int(min(len(train_idx) for train_idx, _ in self.cv_splits))
 
     def get_cv_splits(self) -> List[Tuple]:
         """
@@ -224,114 +263,87 @@ class BaseEA(ABC):
         """
         return self.cv_splits_ref
 
-    def mutate(self, individual: Individual) -> Individual:
-            """
-            Mutates the given individual by randomly altering its hyperparameters based on the mutation probability.
+    def variation_order(self, offspring_cnt: int, crossover_prob: float) -> Tuple[List[str], int]:
+        """Decide, per offspring, whether it comes from mutation ('m') or crossover ('c').
 
-            Args:
-                individual (Individual): The individual to be mutated.
-
-            Returns:
-                Individual: A new individual with mutated hyperparameters.
-            """
-            model_type = individual.model_type
-            params = individual.get_params()
-
-            # mutate the hyperparameters based on the model type
-            if model_type == 'rf':
-                mutated_params = model_param_space.RandomForestParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            elif model_type == 'et':
-                mutated_params = model_param_space.ExtraTreesParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            elif model_type == 'ksvc':
-                mutated_params = model_param_space.KernelSVCParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            elif model_type == 'gb':
-                mutated_params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            elif model_type == 'knn':
-                mutated_params = model_param_space.KNeighborsClassifierParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            elif model_type == 'mlp':
-                mutated_params = model_param_space.MLPClassifierParams().mutate_parameters(model_params=params, var=self.mut_var, mut_rate=self.mut_prob, rng=self.rng)
-            else:
-                raise ValueError(f"Unknown model type: {model_type}")
-
-            # return a new individual with the same type but mutated parameters
-            return Individual(params=cp.deepcopy(mutated_params), model_type=cp.deepcopy(model_type))
-
-    def model_test_evaluation(self, model_type: str, model_params: Dict[str, Any]) -> Tuple[float, float]:
-        """
-        Evaluates a model on the test dataset after fitting on the full training set.
+        Each offspring is independently assigned an operator using ``crossover_prob`` as the
+        probability of crossover (and ``1.0 - crossover_prob`` for mutation). Returns the
+        operator sequence and the total number of parents it consumes (mutation draws 1
+        parent, crossover draws 2).
 
         Args:
-            model_type (str): The type of model to evaluate. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'].
-            model_params (Dict[str, Any]): Dictionary of hyperparameters for the model.
+            offspring_cnt (int): Number of offspring to generate.
+            crossover_prob (float): Probability that a given offspring is generated via
+                crossover; the remaining ``1.0 - crossover_prob`` are generated via mutation.
+
+        Returns:
+            Tuple[List[str], int]: The per-offspring operator sequence (each 'm' or 'c')
+            and the total number of parents required to realize it.
+        """
+        assert 0.0 <= crossover_prob <= 1.0, "Crossover probability must be between 0 and 1."
+        parent_count = {'m': 1, 'c': 2}
+
+        order = self.rng.choice(['m', 'c'], offspring_cnt, p=[1.0 - crossover_prob, crossover_prob])
+        order = [str(op) for op in order]
+
+        assert len(order) == offspring_cnt
+        return order, int(sum(parent_count[op] for op in order))
+
+    @abstractmethod
+    def crossover(self, parent_a: Individual, parent_b: Individual) -> Individual:
+        """
+        Recombines two parents into a single offspring individual. Must be implemented by
+        derived classes, since the genotype representation (and thus how parameter values
+        are combined) differs across EA setups (e.g., single-model HPO vs. CASH).
+
+        Args:
+            parent_a (Individual): The first parent.
+            parent_b (Individual): The second parent.
+
+        Returns:
+            Individual: A new offspring individual derived from both parents.
+        """
+        pass
+
+    @abstractmethod
+    def mutate(self, parent: Individual) -> Individual:
+        """
+        Mutates a parent individual to produce a new offspring individual. Must be implemented
+        by derived classes, since the genotype representation (and thus how parameter values
+        are mutated) differs across EA setups (e.g., single-model HPO vs. CASH).
+
+        Args:
+            parent (Individual): The parent individual to mutate.
+
+        Returns:
+            Individual: A new offspring individual derived from the parent.
+        """
+        pass
+
+    @abstractmethod
+    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float]:
+        """
+        Fits an individual's model on the full training set and evaluates it on the held-out
+        test set. Must be implemented by derived classes, since the way an individual maps to a
+        concrete model differs across EA setups (e.g., single-model HPO vs. CASH).
+
+        Args:
+            individual (Individual): The individual to evaluate.
 
         Returns:
             Tuple[float, float]: A tuple containing (train_score, test_score).
         """
-        assert self.X_train is not None and self.X_test is not None, "Data must be loaded before evaluation."
-        assert self.y_train is not None and self.y_test is not None, "Data must be loaded before evaluation."
-        assert self.binary_classification is not None, "Data must be loaded before evaluation."
-
-        preprocessor = self._build_preprocessor()
-
-        X_train_preprocessed = preprocessor.fit_transform(self.X_train)
-        X_test_preprocessed = preprocessor.transform(self.X_test)
-
-        if model_type == 'RF':
-            eval_params = model_param_space.RandomForestParams().eval_parameters(model_params)
-            model = RandomForestClassifier(**eval_params, random_state=self.seed, n_jobs=self.cores)
-        elif model_type == 'ET':
-            eval_params = model_param_space.ExtraTreesParams().eval_parameters(model_params)
-            model = ExtraTreesClassifier(**eval_params, random_state=self.seed, n_jobs=self.cores)
-        elif model_type == 'KSVC':
-            eval_params = model_param_space.KernelSVCParams().eval_parameters(model_params)
-            model = SVC(**eval_params, random_state=self.seed, probability=True)
-        elif model_type == 'GB':
-            eval_params = model_param_space.GradientBoostParams(binary_class=self.binary_classification).eval_parameters(model_params)
-            model = GradientBoostingClassifier(**eval_params, random_state=self.seed)
-        elif model_type == 'KNN':
-            eval_params = model_param_space.KNeighborsClassifierParams().eval_parameters(model_params)
-            model = KNeighborsClassifier(**eval_params, n_jobs=self.cores)
-        elif model_type == 'MLP':
-            eval_params = model_param_space.MLPClassifierParams().eval_parameters(model_params)
-            layers = (eval_params['layer_1'],
-                      eval_params['layer_2'],
-                      eval_params['layer_3'],
-                      eval_params['layer_4'],
-                      eval_params['layer_5'])
-            model = MLPClassifier(hidden_layer_sizes=layers,
-                                  activation=eval_params['activation'],
-                                  solver=eval_params['solver'],
-                                  alpha=eval_params['alpha'],
-                                  max_iter=eval_params['max_iter'],
-                                  random_state=self.seed)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']")
-
-        model.fit(X_train_preprocessed, self.y_train)
-
-        train_pred_proba = model.predict_proba(X_train_preprocessed)
-        test_pred_proba = model.predict_proba(X_test_preprocessed)
-
-        if self.binary_classification:
-            train_score = float(roc_auc_score(self.y_train, train_pred_proba[:, 1]))
-            test_score = float(roc_auc_score(self.y_test, test_pred_proba[:, 1]))
-        else:
-            train_score = float(roc_auc_score(self.y_train, train_pred_proba, multi_class='ovo', labels=self.labels))
-            test_score = float(roc_auc_score(self.y_test, test_pred_proba, multi_class='ovo', labels=self.labels))
-
-        return train_score, test_score
+        pass
 
     @abstractmethod
-    def evolve(self, gens: int, ucb: bool, pi: bool, ei: bool) -> None:
+    def evolve(self, gens: int, checkpoint_dir: Optional[str] = None) -> None:
         """
         Evolves the population over a given number of generations.
         Must be implemented by derived classes.
 
         Args:
             gens (int): Number of generations to evolve.
-            ucb (bool): Whether to use Upper Confidence Bound for selection.
-            pi (bool): Whether to use Probability of Improvement for selection.
-            ei (bool): Whether to use Expected Improvement for selection.
+            checkpoint_dir (Optional[str]): Directory to save checkpoints. If None, no checkpoints are saved.
         """
         pass
 

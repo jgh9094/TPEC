@@ -64,8 +64,8 @@ class ModelParams(ABC):
     def generate_random_parameters(self, rng: np.random.Generator) -> Dict[str, Any]:
         """
         Generates a random set of parameter values based on the defined parameter space.
-        Each parameter is sampled independently according to its type. Should be ready for
-        hard evaluation. Format {parameter_name: value}.
+        Each parameter is sampled independently according to its type.
+        Format {parameter_name: value}.
 
         Parameters:
             rng (np.random.Generator): A NumPy random generator instance.
@@ -87,6 +87,7 @@ class ModelParams(ABC):
     def get_params_by_type(self, type: str) -> Dict:
         """
         Retrieves a subset of parameters of a given type.
+
         Parameters
             type (str): The type of parameters to retrieve ('int', 'float', 'cat', 'bool').
         Returns:
@@ -99,9 +100,9 @@ class ModelParams(ABC):
     def shift_float_parameter(self, cur_value: float, min: float, max: float, var: float, rng: np.random.Generator) -> float:
         """
         Shifts a float parameter either up or down within bounds.
-        68% of increases/decreases will be within var% of the current value
-        95% of increases/decreases will be within 2*var% of the current value
-        99.7% of increases/decreases will be within 3*var% of the current value
+        68% of increases/decreases will be within var of the current value
+        95% of increases/decreases will be within 2*var of the current value
+        99.7% of increases/decreases will be within 3*var of the current value
         """
         value = float(cur_value * rng.normal(1.0, var))
 
@@ -112,9 +113,9 @@ class ModelParams(ABC):
     def shift_int_parameter(self, cur_value: int, min: int, max: int, var: float, rng: np.random.Generator) -> int:
         """
         Shifts a integer parameter either up or down within bounds.
-        68% of increases/decreases will be within var% of the current value
-        95% of increases/decreases will be within 2*var% of the current value
-        99.7% of increases/decreases will be within 3*var% of the current value
+        68% of increases/decreases will be within var of the current value
+        95% of increases/decreases will be within 2*var of the current value
+        99.7% of increases/decreases will be within 3*var of the current value
         """
         value = int(cur_value * rng.normal(1.0, var))
 
@@ -143,6 +144,7 @@ class ModelParams(ABC):
     def pick_categorical_parameter(self, choices: List | Tuple, rng: np.random.Generator):
         """
         Picks a random value from a list of categorical choices.
+
         Parameters
             choices (List | Tuple): A list or tuple of possible categorical values.
             rng (np.random.Generator): A NumPy random generator instance.
@@ -154,7 +156,7 @@ class ModelParams(ABC):
         """
         Mutates a given set of hyperparameters in-place by shifting each selected gene
         away from its current value. Each gene is independently mutated with probability
-        ``mut_rate``. Should be ready for hard evaluation.
+        ``mut_rate``.
 
         Parameters:
             model_params (Dict[str, Any]): The set of hyperparameters to mutate.
