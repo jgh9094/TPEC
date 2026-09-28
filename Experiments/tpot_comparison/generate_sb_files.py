@@ -55,6 +55,7 @@ python "$RUNNER" \\
     --data_path "$DATA_PATH" \\
     --train_p "$TRAIN_P" \\
     --output_directory "$OUTPUT_DIRECTORY" \\
+    --classification true \\
     --cores "$CORES" \\
     --pop_size "$POP_SIZE" \\
     --generations "$GENERATIONS" \\

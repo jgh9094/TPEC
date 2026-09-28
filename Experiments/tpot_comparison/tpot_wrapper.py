@@ -1,4 +1,4 @@
-"""Run one TPOT CASH-baseline experiment on the spine-opioid dataset."""
+"""Run one TPOT experiment over the project's full linear CASH space."""
 
 import argparse
 import json
@@ -8,16 +8,16 @@ import sys
 import traceback
 from functools import partial
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 import tpot
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score, roc_auc_score
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
+from sklearn.preprocessing import OneHotEncoder
 
 # SLURM invokes this file directly, so make repository imports independent of cwd.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +33,7 @@ from Source.Base.model_param_space import DataContext
 
 
 OUTCOME_COLUMNS = ("LOS_extended", "discharge_Home", "HOSP_READM_90")
-SCALE_COLUMNS = (
+SO_NUMERICAL_COLUMNS = (
     "AGE",
     "BMI",
     "SBP",
@@ -51,14 +51,24 @@ SCALE_COLUMNS = (
 )
 
 
+def parse_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean, received {value!r}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one TPOT CASH comparison")
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--task", choices=["so"], required=True)
-    parser.add_argument("--y_label", choices=OUTCOME_COLUMNS, required=True)
+    parser.add_argument("--task", choices=["so", "debug"], required=True)
+    parser.add_argument("--y_label", required=True)
     parser.add_argument("--data_path", type=Path, required=True)
     parser.add_argument("--train_p", type=float, required=True)
     parser.add_argument("--output_directory", type=Path, required=True)
+    parser.add_argument("--classification", type=parse_bool, default=True)
     parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--pop_size", type=int, required=True)
     parser.add_argument("--generations", type=int, required=True)
@@ -94,11 +104,13 @@ def is_run_complete(output_directory: Path) -> bool:
 
 
 def load_spine_opioid_data(data_path: Path, y_label: str):
+    if y_label not in OUTCOME_COLUMNS:
+        raise ValueError(f"Invalid spine-opioid outcome {y_label!r}")
     data = pd.read_csv(data_path)
     missing_outcomes = [column for column in OUTCOME_COLUMNS if column not in data]
     if missing_outcomes:
         raise ValueError(f"Missing outcome columns: {missing_outcomes}")
-    missing_scaled = [column for column in SCALE_COLUMNS if column not in data]
+    missing_scaled = [column for column in SO_NUMERICAL_COLUMNS if column not in data]
     if missing_scaled:
         raise ValueError(f"Missing columns that must be scaled: {missing_scaled}")
 
@@ -106,16 +118,39 @@ def load_spine_opioid_data(data_path: Path, y_label: str):
     data = data.drop(columns=other_outcomes)
     X = data.drop(columns=[y_label])
     y = data[y_label].to_numpy()
-    classes = np.unique(y)
-    if len(classes) < 2:
-        raise ValueError(f"Outcome {y_label!r} has fewer than two classes")
-    return X, y, classes
+    return X, y, list(SO_NUMERICAL_COLUMNS), []
 
 
-def make_preprocessor() -> ColumnTransformer:
-    """Match BaseEA: scale the clinical continuous columns and pass the rest."""
+def load_generic_data(data_path: Path, y_label: str):
+    data = pd.read_csv(data_path)
+    if y_label not in data:
+        raise ValueError(f"Target column {y_label!r} is missing from {data_path}")
+    X = data.drop(columns=[y_label])
+    return X, data[y_label].to_numpy(), list(X.columns), []
+
+
+def make_preprocessor(
+    numerical_columns: Sequence[str],
+    categorical_columns: Sequence[str],
+) -> ColumnTransformer:
+    """Match CASH: numericize/reorder only; leave scaling to the evolved stage."""
+    transformers = []
+    if numerical_columns:
+        transformers.append(("num", "passthrough", list(numerical_columns)))
+    if categorical_columns:
+        transformers.append(
+            (
+                "cat",
+                OneHotEncoder(
+                    drop=None,
+                    sparse_output=False,
+                    handle_unknown="ignore",
+                ),
+                list(categorical_columns),
+            )
+        )
     return ColumnTransformer(
-        transformers=[("num", StandardScaler(), list(SCALE_COLUMNS))],
+        transformers=transformers,
         remainder="passthrough",
     )
 
@@ -126,6 +161,9 @@ def prepare_data(
     train_p: float,
     n_folds: int,
     seed: int,
+    classification: bool,
+    numerical_columns: Sequence[str],
+    categorical_columns: Sequence[str],
 ):
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -133,15 +171,18 @@ def prepare_data(
         train_size=train_p,
         random_state=seed,
         shuffle=True,
-        stratify=y,
+        stratify=y if classification else None,
     )
 
-    splitter = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    if classification:
+        splitter = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    else:
+        splitter = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
     fold_data = []
     for train_indices, validation_indices in splitter.split(X_train, y_train):
         X_fold_train = X_train.iloc[train_indices].reset_index(drop=True)
         X_fold_validation = X_train.iloc[validation_indices].reset_index(drop=True)
-        preprocessor = make_preprocessor()
+        preprocessor = make_preprocessor(numerical_columns, categorical_columns)
         fold_data.append(
             (
                 preprocessor.fit_transform(X_fold_train),
@@ -151,7 +192,7 @@ def prepare_data(
             )
         )
 
-    final_preprocessor = make_preprocessor()
+    final_preprocessor = make_preprocessor(numerical_columns, categorical_columns)
     X_train_transformed = final_preprocessor.fit_transform(X_train)
     X_test_transformed = final_preprocessor.transform(X_test)
     return (
@@ -164,7 +205,17 @@ def prepare_data(
     )
 
 
-def auc_score(estimator, X, y, classes: Sequence) -> float:
+def performance_score(
+    estimator,
+    X,
+    y,
+    classification: bool,
+    classes: Optional[Sequence],
+) -> float:
+    if not classification:
+        return float(r2_score(y, estimator.predict(X)))
+
+    assert classes is not None
     probabilities = estimator.predict_proba(X)
     estimator_classes = np.asarray(estimator.classes_)
     if len(classes) == 2:
@@ -176,17 +227,31 @@ def auc_score(estimator, X, y, classes: Sequence) -> float:
             y,
             probabilities,
             multi_class="ovo",
-            labels=estimator_classes,
+            labels=classes,
         )
     )
 
 
-def cross_validated_auc(estimator, *, fold_data: Iterable, classes: Sequence) -> float:
+def cross_validated_score(
+    estimator,
+    *,
+    fold_data: Iterable,
+    classification: bool,
+    classes: Optional[Sequence],
+) -> float:
     scores = []
     for X_train, X_validation, y_train, y_validation in fold_data:
         fold_estimator = clone(estimator)
         fold_estimator.fit(X_train, y_train)
-        scores.append(auc_score(fold_estimator, X_validation, y_validation, classes))
+        scores.append(
+            performance_score(
+                fold_estimator,
+                X_validation,
+                y_validation,
+                classification,
+                classes,
+            )
+        )
     return float(np.mean(scores))
 
 
@@ -235,9 +300,11 @@ def write_generation_checkpoints(
     X_test,
     y_train,
     y_test,
-    classes: Sequence,
+    classification: bool,
+    classes: Optional[Sequence],
     seed: int,
     task_id: str,
+    metric_name: str,
 ) -> list[dict]:
     """Reconstruct best-so-far diagnostics at every completed TPOT generation."""
     individual_column = next(
@@ -280,8 +347,12 @@ def write_generation_checkpoints(
         if best_id != last_best_id:
             pipeline = best_row[individual_column].export_pipeline()
             pipeline.fit(X_train, y_train)
-            last_train_score = auc_score(pipeline, X_train, y_train, classes)
-            last_test_score = auc_score(pipeline, X_test, y_test, classes)
+            last_train_score = performance_score(
+                pipeline, X_train, y_train, classification, classes
+            )
+            last_test_score = performance_score(
+                pipeline, X_test, y_test, classification, classes
+            )
             last_best_id = best_id
 
         generation = int(raw_generation) - first_generation - 1
@@ -290,6 +361,7 @@ def write_generation_checkpoints(
         checkpoint = {
             "generation": generation,
             "candidates_considered": hard_evals,
+            "hard_evals": hard_evals,
             "train_auc": last_train_score,
             "val_auc": validation_score,
             "test_auc": last_test_score,
@@ -301,6 +373,7 @@ def write_generation_checkpoints(
                 "task_id": task_id,
                 "model_type": "TPOT_CASH",
                 "seed": seed,
+                "metric": metric_name,
                 "train_accuracy": last_train_score,
                 "validation_accuracy": validation_score,
                 "test_accuracy": last_test_score,
@@ -319,7 +392,19 @@ def run(args: argparse.Namespace) -> None:
         return
 
     args.output_directory.mkdir(parents=True, exist_ok=True)
-    X, y, classes = load_spine_opioid_data(args.data_path, args.y_label)
+    if args.task == "so":
+        X, y, numerical_columns, categorical_columns = load_spine_opioid_data(
+            args.data_path, args.y_label
+        )
+    else:
+        X, y, numerical_columns, categorical_columns = load_generic_data(
+            args.data_path, args.y_label
+        )
+
+    classes = np.unique(y) if args.classification else None
+    if args.classification and len(classes) < 2:
+        raise ValueError(f"Outcome {args.y_label!r} has fewer than two classes")
+
     (
         X_train_raw,
         X_train,
@@ -327,15 +412,38 @@ def run(args: argparse.Namespace) -> None:
         y_train,
         y_test,
         fold_data,
-    ) = prepare_data(X, y, args.train_p, args.n_folds, args.seed)
+    ) = prepare_data(
+        X,
+        y,
+        args.train_p,
+        args.n_folds,
+        args.seed,
+        args.classification,
+        numerical_columns,
+        categorical_columns,
+    )
+
+    smallest_cv_train_size = min(len(fold[2]) for fold in fold_data)
+    n_classes = len(classes) if classes is not None else 0
 
     data_context = DataContext(
-        n_samples=len(X_train_raw),
-        n_features=X_train.shape[1],
-        n_classes=len(classes),
+        n_samples=smallest_cv_train_size,
+        n_features=X_train_raw.shape[1],
+        n_classes=n_classes,
     )
-    objective = partial(cross_validated_auc, fold_data=fold_data, classes=classes)
-    objective.__name__ = "validation_auc"
+    has_protected_columns = len(numerical_columns) < X_train_raw.shape[1]
+    scale_columns = (
+        tuple(range(len(numerical_columns))) if has_protected_columns else None
+    )
+    objective_name = "validation_auc" if args.classification else "validation_r2"
+    metric_name = "roc_auc" if args.classification else "r2"
+    objective = partial(
+        cross_validated_score,
+        fold_data=fold_data,
+        classification=args.classification,
+        classes=classes,
+    )
+    objective.__name__ = objective_name
 
     configuration = {
         "seed": args.seed,
@@ -344,6 +452,7 @@ def run(args: argparse.Namespace) -> None:
         "data_path": str(args.data_path),
         "train_p": args.train_p,
         "output_directory": str(args.output_directory),
+        "classification": args.classification,
         "cores": args.cores,
         "population_size": args.pop_size,
         "generations": args.generations,
@@ -351,6 +460,9 @@ def run(args: argparse.Namespace) -> None:
         "n_folds": args.n_folds,
         "max_eval_time_mins": args.max_eval_time_mins,
         "classes": classes,
+        "numerical_columns": numerical_columns,
+        "categorical_columns": categorical_columns,
+        "scale_columns": scale_columns,
     }
     write_json(args.output_directory / "configuration.json", configuration)
     print(json.dumps(json_safe(configuration), indent=2), flush=True)
@@ -359,17 +471,22 @@ def run(args: argparse.Namespace) -> None:
     checkpoint_directory.mkdir(parents=True, exist_ok=True)
 
     estimator = tpot.TPOTEstimator(
-        search_space=generate_tpot_search_space(data_context, args.seed),
+        search_space=generate_tpot_search_space(
+            data_context=data_context,
+            seed=args.seed,
+            classification=args.classification,
+            scale_columns=scale_columns,
+        ),
         scorers=[],
         scorers_weights=[],
         other_objective_functions=[objective],
         other_objective_functions_weights=[1.0],
-        objective_function_names=["validation_auc"],
+        objective_function_names=[objective_name],
         population_size=args.pop_size,
         initial_population_size=args.pop_size,
         generations=args.generations,
-        classification=True,
-        disable_label_encoder=True,
+        classification=args.classification,
+        disable_label_encoder=args.classification,
         max_eval_time_mins=args.max_eval_time_mins,
         max_time_mins=None,
         n_jobs=args.cores,
@@ -380,24 +497,30 @@ def run(args: argparse.Namespace) -> None:
     estimator.fit(X_train, y_train)
 
     best_pipeline = estimator.fitted_pipeline_
-    train_score = auc_score(best_pipeline, X_train, y_train, classes)
-    test_score = auc_score(best_pipeline, X_test, y_test, classes)
+    train_score = performance_score(
+        best_pipeline, X_train, y_train, args.classification, classes
+    )
+    test_score = performance_score(
+        best_pipeline, X_test, y_test, args.classification, classes
+    )
     evaluated = estimator.evaluated_individuals
-    validation_scores = pd.to_numeric(evaluated["validation_auc"], errors="coerce")
+    validation_scores = pd.to_numeric(evaluated[objective_name], errors="coerce")
     validation_score = float(validation_scores.max())
 
     save_archive(evaluated, args.output_directory)
     checkpoints = write_generation_checkpoints(
         evaluated_individuals=evaluated,
         output_directory=args.output_directory,
-        objective_name="validation_auc",
+        objective_name=objective_name,
         X_train=X_train,
         X_test=X_test,
         y_train=y_train,
         y_test=y_test,
+        classification=args.classification,
         classes=classes,
         seed=args.seed,
         task_id=args.y_label,
+        metric_name=metric_name,
     )
 
     with (args.output_directory / "best_pipeline.pkl").open("wb") as file:
@@ -407,7 +530,7 @@ def run(args: argparse.Namespace) -> None:
         "task_id": args.y_label,
         "model_type": "TPOT_CASH",
         "seed": args.seed,
-        "metric": "roc_auc",
+        "metric": metric_name,
         "train_accuracy": train_score,
         "validation_accuracy": validation_score,
         "test_accuracy": test_score,

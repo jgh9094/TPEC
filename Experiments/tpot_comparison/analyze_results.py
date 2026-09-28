@@ -53,9 +53,10 @@ def collect_results(
                     "task": task,
                     "seed": seed,
                     "status": "missing",
-                    "train_auc": np.nan,
-                    "validation_auc": np.nan,
-                    "test_auc": np.nan,
+                    "metric": None,
+                    "train_score": np.nan,
+                    "validation_score": np.nan,
+                    "test_score": np.nan,
                     "error": None,
                 }
                 if result_path.is_file():
@@ -63,9 +64,10 @@ def collect_results(
                         result = json.load(file)
                     row.update(
                         status="success",
-                        train_auc=result.get("train_accuracy", np.nan),
-                        validation_auc=result.get("validation_accuracy", np.nan),
-                        test_auc=result.get("test_accuracy", np.nan),
+                        metric=result.get("metric"),
+                        train_score=result.get("train_accuracy", np.nan),
+                        validation_score=result.get("validation_accuracy", np.nan),
+                        test_score=result.get("test_accuracy", np.nan),
                     )
                 elif failure_path.is_file():
                     with failure_path.open(encoding="utf-8") as file:
@@ -85,14 +87,17 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
             {
                 "population_size": pop_size,
                 "task": task,
+                "metric": successful["metric"].dropna().iloc[0]
+                if successful["metric"].notna().any()
+                else None,
                 "successes": int((group["status"] == "success").sum()),
                 "failures": int((group["status"] == "failed").sum()),
                 "missing": int((group["status"] == "missing").sum()),
-                "validation_auc_mean": successful["validation_auc"].mean(),
-                "validation_auc_std": successful["validation_auc"].std(ddof=1),
-                "test_auc_mean": successful["test_auc"].mean(),
-                "test_auc_std": successful["test_auc"].std(ddof=1),
-                "test_auc_median": successful["test_auc"].median(),
+                "validation_mean": successful["validation_score"].mean(),
+                "validation_std": successful["validation_score"].std(ddof=1),
+                "test_mean": successful["test_score"].mean(),
+                "test_std": successful["test_score"].std(ddof=1),
+                "test_median": successful["test_score"].median(),
             }
         )
     return pd.DataFrame(summary_rows)
