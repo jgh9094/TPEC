@@ -1,0 +1,47 @@
+{
+    "task_id": null,
+    "seed": 0,
+    "architecture": {
+        "feature_scaling": "RobustScaler",
+        "feature_engineering": "PowerTransformer",
+        "feature_selection": "passthrough",
+        "predictor": "GB"
+    },
+    "train_accuracy": 0.9055161796346974,
+    "validation_accuracy": 0.820995070405106,
+    "test_accuracy": 0.8314832439851865,
+    "best_pipeline": {
+        "feature_scaling": {
+            "name": "RobustScaler",
+            "params": {
+                "with_centering": "True",
+                "with_scaling": "False",
+                "q_min": 19.484129435672603,
+                "q_max": 86.98590805174716
+            }
+        },
+        "feature_engineering": {
+            "name": "PowerTransformer",
+            "params": {
+                "method": "yeo-johnson",
+                "standardize": "True"
+            }
+        },
+        "feature_selection": {
+            "name": "passthrough",
+            "params": {}
+        },
+        "predictor": {
+            "name": "GB",
+            "params": {
+                "loss": "log_loss",
+                "learning_rate": 0.00879941762442727,
+                "n_estimators": 852,
+                "subsample": 0.49696056569675096,
+                "criterion": "squared_error",
+                "max_depth": 4,
+                "max_features": 0.780729350044631
+            }
+        }
+    }
+}

@@ -1,0 +1,41 @@
+{
+    "task_id": null,
+    "seed": 1,
+    "architecture": {
+        "feature_scaling": "StandardScaler",
+        "feature_engineering": "passthrough",
+        "feature_selection": "passthrough",
+        "predictor": "RF"
+    },
+    "train_accuracy": 0.997629365179327,
+    "validation_accuracy": 0.8108321984832945,
+    "test_accuracy": 0.8199873585321006,
+    "best_pipeline": {
+        "feature_scaling": {
+            "name": "StandardScaler",
+            "params": {
+                "with_mean": "True",
+                "with_std": "False"
+            }
+        },
+        "feature_engineering": {
+            "name": "passthrough",
+            "params": {}
+        },
+        "feature_selection": {
+            "name": "passthrough",
+            "params": {}
+        },
+        "predictor": {
+            "name": "RF",
+            "params": {
+                "n_estimators": 324,
+                "criterion": "log_loss",
+                "max_depth": 26,
+                "max_features": 0.8276370533016777,
+                "max_samples": 0.40921729654188743,
+                "class_weight": "balanced_subsample"
+            }
+        }
+    }
+}

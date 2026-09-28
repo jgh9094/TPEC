@@ -9,10 +9,10 @@ The sweep varies four dimensions, each encoded by a directory level under
 
   * Population size  -> Pop25 / Pop50 / Pop100
   * Mutation prob/var -> MutPP_VarVV  (PP, VV in {25, 50} meaning 0.25 / 0.50)
-  * Search strategy   -> EA_Exploit, EA_Explore, TPE25, TPE50, TPE75, TPE100
+  * Search strategy   -> EA, TPE25, TPE50, TPE75, TPE100
   * Model             -> rf, et, ksvc, gb, knn, mlp
 
-That is 3 x 4 x 6 x 6 = 432 files.
+That is 3 x 4 x 5 x 6 = 360 files.
 
 Every run is standardized to a total budget of 500 hard evaluations. With the EA's
 convention that total evaluations = POP_SIZE * (GENS + 1) (the initial population plus
@@ -50,18 +50,16 @@ MUT_CONFIGS = {
     "Mut50_Var50": ("0.50", "0.50", "M5050"),
 }
 
-# strategy directory -> (TPE_PROB, EXPLORE_MUT_SCALE, job-name prefix)
-# Values mirror the original Pop25/Mut25_Var25 templates:
-#   EA_Exploit : no TPE, small exploration variance (local exploitation)
-#   EA_Explore : no TPE, large exploration variance (global exploration)
-#   TPExx      : TPE-guided with probability xx%, large exploration variance otherwise
+# strategy directory -> (TPE_PROB, job-name prefix)
+#   EA    : no TPE -- every offspring resamples its parameters uniformly (unbiased exploration)
+#   TPExx : TPE-guided with probability xx%; TPE offspring take a small local shift (mut_var),
+#           non-TPE offspring resample uniformly at random
 STRATEGY_CONFIGS = {
-    "EA_Exploit": ("0.0", "0.50", "explo"),
-    "EA_Explore": ("0.0", "2.0", "explr"),
-    "TPE25": ("0.25", "2.0", "25"),
-    "TPE50": ("0.50", "2.0", "50"),
-    "TPE75": ("0.75", "2.0", "75"),
-    "TPE100": ("1.0", "2.0", "1h"),
+    "EA": ("0.0", "ea"),
+    "TPE25": ("0.25", "25"),
+    "TPE50": ("0.50", "50"),
+    "TPE75": ("0.75", "75"),
+    "TPE100": ("1.0", "1h"),
 }
 
 # .sb file stem -> MODEL argument passed to runner.py
@@ -105,8 +103,6 @@ TPE_PROB={tpe_prob}
 TOURNAMENT_SIZE=2
 NUM_OFFSPRING=20
 GAMMA=0.3
-TPE_MUT_SCALE=0.50
-EXPLORE_MUT_SCALE={explore_mut_scale}
 DATA_DIRECTORY={data_directory}
 # variables that are set by the SLURM job array
 # Array of all task IDs from tasks_summary.csv (3 tasks x 21 replicates = 63 jobs)
@@ -137,8 +133,6 @@ python {runner} \\
     --tournament_size $TOURNAMENT_SIZE \\
     --num_offspring $NUM_OFFSPRING \\
     --gamma $GAMMA \\
-    --tpe_mut_scale $TPE_MUT_SCALE \\
-    --explore_mut_scale $EXPLORE_MUT_SCALE \\
     --task so
 """
 
@@ -149,7 +143,7 @@ def main() -> None:
         # sanity: enforce the 500-evaluation budget
         assert pop_size * (gens + 1) == 500, f"{pop_dir}: {pop_size}*({gens}+1) != 500"
         for mut_dir, (mut_prob, mut_var, mut_short) in MUT_CONFIGS.items():
-            for strat_dir, (tpe_prob, explore_scale, strat_prefix) in STRATEGY_CONFIGS.items():
+            for strat_dir, (tpe_prob, strat_prefix) in STRATEGY_CONFIGS.items():
                 out_dir = os.path.join(HPO_DIR, pop_dir, mut_dir, strat_dir)
                 os.makedirs(out_dir, exist_ok=True)
                 for stem, model in MODELS.items():
@@ -162,7 +156,6 @@ def main() -> None:
                         mut_prob=mut_prob,
                         mut_var=mut_var,
                         tpe_prob=tpe_prob,
-                        explore_mut_scale=explore_scale,
                         data_directory=DATA_DIRECTORY,
                         results_root=RESULTS_ROOT,
                         pop_dir=pop_dir,

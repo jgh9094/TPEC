@@ -1,0 +1,2690 @@
+[
+    {
+        "id": 0,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957125312814643,
+        "val_performance": 0.7506432621248014,
+        "error": false
+    },
+    {
+        "id": 1,
+        "key": "{\"feature_engineering\":{\"name\":\"Nystroem\",\"params\":{\"degree\":1,\"gamma\":0.10328082738246468,\"kernel\":\"rbf\",\"n_components\":4042}},\"feature_scaling\":{\"name\":\"MaxAbsScaler\",\"params\":{}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.16493288507789616}},\"predictor\":{\"name\":\"KSVC\",\"params\":{\"C\":0.03280757621882609,\"class_weight\":\"None\",\"decision_function_shape\":\"ovo\",\"degree\":4,\"gamma\":0.018513539089950116,\"kernel\":\"sigmoid\",\"max_iter\":22063}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "MaxAbsScaler",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "Nystroem",
+                "params": {
+                    "kernel": "rbf",
+                    "gamma": 0.10328082738246468,
+                    "degree": 1,
+                    "n_components": 4042
+                }
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.16493288507789616
+                }
+            },
+            "predictor": {
+                "name": "KSVC",
+                "params": {
+                    "C": 0.03280757621882609,
+                    "kernel": "sigmoid",
+                    "gamma": 0.018513539089950116,
+                    "degree": 4,
+                    "max_iter": 22063,
+                    "class_weight": "None",
+                    "decision_function_shape": "ovo"
+                }
+            }
+        },
+        "train_performance": 0.0,
+        "val_performance": 0.0,
+        "error": true
+    },
+    {
+        "id": 2,
+        "key": "{\"feature_engineering\":{\"name\":\"PolynomialFeatures\",\"params\":{\"degree\":2,\"include_bias\":\"True\",\"interaction_only\":\"False\"}},\"feature_scaling\":{\"name\":\"passthrough\",\"params\":{}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005712350231799579}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":98,\"n_neighbors\":149,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "PolynomialFeatures",
+                "params": {
+                    "degree": 2,
+                    "interaction_only": "False",
+                    "include_bias": "True"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005712350231799579
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 149,
+                    "weights": "uniform",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 98,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.7195321092376723,
+        "val_performance": 0.6965950649495924,
+        "error": false
+    },
+    {
+        "id": 3,
+        "key": "{\"feature_engineering\":{\"name\":\"Binarizer\",\"params\":{\"threshold\":0.5412186101763248}},\"feature_scaling\":{\"name\":\"passthrough\",\"params\":{}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.13851791290228088}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"brute\",\"leaf_size\":42,\"n_neighbors\":49,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "Binarizer",
+                "params": {
+                    "threshold": 0.5412186101763248
+                }
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.13851791290228088
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 49,
+                    "weights": "uniform",
+                    "algorithm": "brute",
+                    "leaf_size": 42,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.6476715170827555,
+        "val_performance": 0.5846805766336828,
+        "error": false
+    },
+    {
+        "id": 4,
+        "key": "{\"feature_engineering\":{\"name\":\"Nystroem\",\"params\":{\"degree\":2,\"gamma\":0.0001440024188328727,\"kernel\":\"linear\",\"n_components\":3466}},\"feature_scaling\":{\"name\":\"RobustScaler\",\"params\":{\"q_max\":88.3900377312611,\"q_min\":23.300438093646072,\"with_centering\":\"True\",\"with_scaling\":\"True\"}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.22972200785441332}},\"predictor\":{\"name\":\"KSVC\",\"params\":{\"C\":1.6093142086738024,\"class_weight\":\"balanced\",\"decision_function_shape\":\"ovo\",\"degree\":2,\"gamma\":1.833007290918731,\"kernel\":\"linear\",\"max_iter\":63364}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "RobustScaler",
+                "params": {
+                    "with_centering": "True",
+                    "with_scaling": "True",
+                    "q_min": 23.300438093646072,
+                    "q_max": 88.3900377312611
+                }
+            },
+            "feature_engineering": {
+                "name": "Nystroem",
+                "params": {
+                    "kernel": "linear",
+                    "gamma": 0.0001440024188328727,
+                    "degree": 2,
+                    "n_components": 3466
+                }
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.22972200785441332
+                }
+            },
+            "predictor": {
+                "name": "KSVC",
+                "params": {
+                    "C": 1.6093142086738024,
+                    "kernel": "linear",
+                    "gamma": 1.833007290918731,
+                    "degree": 2,
+                    "max_iter": 63364,
+                    "class_weight": "balanced",
+                    "decision_function_shape": "ovo"
+                }
+            }
+        },
+        "train_performance": 0.0,
+        "val_performance": 0.0,
+        "error": true
+    },
+    {
+        "id": 5,
+        "key": "{\"feature_engineering\":{\"name\":\"FeatureAgglomeration\",\"params\":{\"linkage\":\"average\",\"metric\":\"cosine\",\"n_clusters\":36,\"pooling_func\":\"min\"}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.01629851098991118}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"log_loss\",\"max_depth\":23,\"max_features\":0.19167793576833123,\"max_samples\":0.8023036883023031,\"n_estimators\":162}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "FeatureAgglomeration",
+                "params": {
+                    "n_clusters": 36,
+                    "linkage": "average",
+                    "metric": "cosine",
+                    "pooling_func": "min"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.01629851098991118
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 162,
+                    "criterion": "log_loss",
+                    "max_depth": 23,
+                    "max_features": 0.19167793576833123,
+                    "max_samples": 0.8023036883023031,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 0.7474305074108141,
+        "val_performance": 0.5735960780861848,
+        "error": false
+    },
+    {
+        "id": 6,
+        "key": "{\"feature_engineering\":{\"name\":\"KBinsDiscretizer\",\"params\":{\"encode\":\"ordinal\",\"n_bins\":23,\"strategy\":\"kmeans\"}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"True\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"MLP\",\"params\":{\"activation\":\"relu\",\"alpha\":0.0016927954298934392,\"layer_1\":88,\"layer_2\":37,\"layer_3\":52,\"layer_4\":65,\"layer_5\":34,\"max_iter\":32802,\"solver\":\"lbfgs\"}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "True"
+                }
+            },
+            "feature_engineering": {
+                "name": "KBinsDiscretizer",
+                "params": {
+                    "n_bins": 23,
+                    "encode": "ordinal",
+                    "strategy": "kmeans"
+                }
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "MLP",
+                "params": {
+                    "layer_1": 88,
+                    "layer_2": 37,
+                    "layer_3": 52,
+                    "layer_4": 65,
+                    "layer_5": 34,
+                    "activation": "relu",
+                    "solver": "lbfgs",
+                    "alpha": 0.0016927954298934392,
+                    "max_iter": 32802
+                }
+            }
+        },
+        "train_performance": 1.0,
+        "val_performance": 0.6339900081121546,
+        "error": false
+    },
+    {
+        "id": 7,
+        "key": "{\"feature_engineering\":{\"name\":\"PowerTransformer\",\"params\":{\"method\":\"yeo-johnson\",\"standardize\":\"False\"}},\"feature_scaling\":{\"name\":\"Normalizer\",\"params\":{\"norm\":\"l2\"}},\"feature_selection\":{\"name\":\"SelectPercentile\",\"params\":{\"percentile\":47}},\"predictor\":{\"name\":\"ET\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"entropy\",\"max_depth\":25,\"max_features\":0.9635781386704019,\"n_estimators\":723}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "Normalizer",
+                "params": {
+                    "norm": "l2"
+                }
+            },
+            "feature_engineering": {
+                "name": "PowerTransformer",
+                "params": {
+                    "method": "yeo-johnson",
+                    "standardize": "False"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectPercentile",
+                "params": {
+                    "percentile": 47
+                }
+            },
+            "predictor": {
+                "name": "ET",
+                "params": {
+                    "n_estimators": 723,
+                    "criterion": "entropy",
+                    "max_depth": 25,
+                    "max_features": 0.9635781386704019,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 1.0,
+        "val_performance": 0.7432858445635194,
+        "error": false
+    },
+    {
+        "id": 8,
+        "key": "{\"feature_engineering\":{\"name\":\"Binarizer\",\"params\":{\"threshold\":0.4822159457216967}},\"feature_scaling\":{\"name\":\"passthrough\",\"params\":{}},\"feature_selection\":{\"name\":\"SelectPercentile\",\"params\":{\"percentile\":89}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"kd_tree\",\"leaf_size\":89,\"n_neighbors\":127,\"p\":1,\"weights\":\"distance\"}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "Binarizer",
+                "params": {
+                    "threshold": 0.4822159457216967
+                }
+            },
+            "feature_selection": {
+                "name": "SelectPercentile",
+                "params": {
+                    "percentile": 89
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 127,
+                    "weights": "distance",
+                    "algorithm": "kd_tree",
+                    "leaf_size": 89,
+                    "p": 1
+                }
+            }
+        },
+        "train_performance": 0.9957792387221934,
+        "val_performance": 0.5934469608977274,
+        "error": false
+    },
+    {
+        "id": 9,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"True\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":66,\"n_neighbors\":139,\"p\":2,\"weights\":\"distance\"}}}",
+        "generation": -1,
+        "construction": "random",
+        "operation": null,
+        "parent_ids": null,
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "True"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 139,
+                    "weights": "distance",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 66,
+                    "p": 2
+                }
+            }
+        },
+        "train_performance": 1.0,
+        "val_performance": 0.7425724005291997,
+        "error": false
+    },
+    {
+        "id": 10,
+        "key": "{\"feature_engineering\":{\"name\":\"PolynomialFeatures\",\"params\":{\"degree\":2,\"include_bias\":\"True\",\"interaction_only\":\"False\"}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005712350231799579}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":98,\"n_neighbors\":149,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": 0,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            2,
+            0
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "PolynomialFeatures",
+                "params": {
+                    "degree": 2,
+                    "interaction_only": "False",
+                    "include_bias": "True"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005712350231799579
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 149,
+                    "weights": "uniform",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 98,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.7195321092376723,
+        "val_performance": 0.6965950649495924,
+        "error": false
+    },
+    {
+        "id": 11,
+        "key": "{\"feature_engineering\":{\"name\":\"PolynomialFeatures\",\"params\":{\"degree\":2,\"include_bias\":\"True\",\"interaction_only\":\"True\"}},\"feature_scaling\":{\"name\":\"Normalizer\",\"params\":{\"norm\":\"l1\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005712350231799579}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":54,\"n_neighbors\":149,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            2,
+            2
+        ],
+        "ei": 0.0025173078113773784,
+        "genome": {
+            "feature_scaling": {
+                "name": "Normalizer",
+                "params": {
+                    "norm": "l1"
+                }
+            },
+            "feature_engineering": {
+                "name": "PolynomialFeatures",
+                "params": {
+                    "degree": 2,
+                    "interaction_only": "True",
+                    "include_bias": "True"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005712350231799579
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 149,
+                    "weights": "uniform",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 54,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.6563957182029133,
+        "val_performance": 0.6247881343361259,
+        "error": false
+    },
+    {
+        "id": 12,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            0,
+            6
+        ],
+        "ei": 0.6956644883713228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957125312814643,
+        "val_performance": 0.7506432621248014,
+        "error": false
+    },
+    {
+        "id": 13,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"None\",\"criterion\":\"gini\",\"max_depth\":28,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            0,
+            0
+        ],
+        "ei": 0.6956644883713228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 28,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "None"
+                }
+            }
+        },
+        "train_performance": 0.9948124908221789,
+        "val_performance": 0.7552998192897773,
+        "error": false
+    },
+    {
+        "id": 14,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"passthrough\",\"params\":{}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005712350231799579}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":98,\"n_neighbors\":149,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            2,
+            9
+        ],
+        "ei": 0.0025173078113773784,
+        "genome": {
+            "feature_scaling": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005712350231799579
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 149,
+                    "weights": "uniform",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 98,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.7136326704692849,
+        "val_performance": 0.6962356013442081,
+        "error": false
+    },
+    {
+        "id": 15,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8976831416029117,\"max_samples\":0.49367150458566045,\"n_estimators\":324}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            0,
+            0
+        ],
+        "ei": 0.6956644883713228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8976831416029117,
+                    "max_samples": 0.49367150458566045,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 0.9989173304712423,
+        "val_performance": 0.7456649565973925,
+        "error": false
+    },
+    {
+        "id": 16,
+        "key": "{\"feature_engineering\":{\"name\":\"PolynomialFeatures\",\"params\":{\"degree\":2,\"include_bias\":\"True\",\"interaction_only\":\"False\"}},\"feature_scaling\":{\"name\":\"RobustScaler\",\"params\":{\"q_max\":70.26847971433095,\"q_min\":13.658752724021362,\"with_centering\":\"False\",\"with_scaling\":\"True\"}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.3295331749755539}},\"predictor\":{\"name\":\"MLP\",\"params\":{\"activation\":\"tanh\",\"alpha\":0.0011701910367810707,\"layer_1\":62,\"layer_2\":58,\"layer_3\":66,\"layer_4\":39,\"layer_5\":62,\"max_iter\":83382,\"solver\":\"adam\"}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            2,
+            2
+        ],
+        "ei": 0.0025173078113773784,
+        "genome": {
+            "feature_scaling": {
+                "name": "RobustScaler",
+                "params": {
+                    "with_centering": "False",
+                    "with_scaling": "True",
+                    "q_min": 13.658752724021362,
+                    "q_max": 70.26847971433095
+                }
+            },
+            "feature_engineering": {
+                "name": "PolynomialFeatures",
+                "params": {
+                    "degree": 2,
+                    "interaction_only": "False",
+                    "include_bias": "True"
+                }
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.3295331749755539
+                }
+            },
+            "predictor": {
+                "name": "MLP",
+                "params": {
+                    "layer_1": 62,
+                    "layer_2": 58,
+                    "layer_3": 66,
+                    "layer_4": 39,
+                    "layer_5": 62,
+                    "activation": "tanh",
+                    "solver": "adam",
+                    "alpha": 0.0011701910367810707,
+                    "max_iter": 83382
+                }
+            }
+        },
+        "train_performance": 0.46598751282596973,
+        "val_performance": 0.4528404105989736,
+        "error": false
+    },
+    {
+        "id": 17,
+        "key": "{\"feature_engineering\":{\"name\":\"Binarizer\",\"params\":{\"threshold\":0.4822159457216967}},\"feature_scaling\":{\"name\":\"passthrough\",\"params\":{}},\"feature_selection\":{\"name\":\"SelectPercentile\",\"params\":{\"percentile\":89}},\"predictor\":{\"name\":\"MLP\",\"params\":{\"activation\":\"identity\",\"alpha\":4.113471583743897e-06,\"layer_1\":67,\"layer_2\":46,\"layer_3\":76,\"layer_4\":35,\"layer_5\":26,\"max_iter\":28403,\"solver\":\"adam\"}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            8,
+            8
+        ],
+        "ei": 0.0025173078113773784,
+        "genome": {
+            "feature_scaling": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_engineering": {
+                "name": "Binarizer",
+                "params": {
+                    "threshold": 0.4822159457216967
+                }
+            },
+            "feature_selection": {
+                "name": "SelectPercentile",
+                "params": {
+                    "percentile": 89
+                }
+            },
+            "predictor": {
+                "name": "MLP",
+                "params": {
+                    "layer_1": 67,
+                    "layer_2": 46,
+                    "layer_3": 76,
+                    "layer_4": 35,
+                    "layer_5": 26,
+                    "activation": "identity",
+                    "solver": "adam",
+                    "alpha": 4.113471583743897e-06,
+                    "max_iter": 28403
+                }
+            }
+        },
+        "train_performance": 0.6673857623498378,
+        "val_performance": 0.6439946819408299,
+        "error": false
+    },
+    {
+        "id": 18,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"Normalizer\",\"params\":{\"norm\":\"l2\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":66,\"n_neighbors\":139,\"p\":2,\"weights\":\"distance\"}}}",
+        "generation": 0,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            7,
+            9
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "Normalizer",
+                "params": {
+                    "norm": "l2"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 139,
+                    "weights": "distance",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 66,
+                    "p": 2
+                }
+            }
+        },
+        "train_performance": 1.0,
+        "val_performance": 0.6318097037637401,
+        "error": false
+    },
+    {
+        "id": 19,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 0,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            0,
+            0
+        ],
+        "ei": 0.6956644883713228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956542709748136,
+        "val_performance": 0.7501091058901902,
+        "error": false
+    },
+    {
+        "id": 20,
+        "key": "{\"feature_engineering\":{\"name\":\"PolynomialFeatures\",\"params\":{\"degree\":2,\"include_bias\":\"True\",\"interaction_only\":\"False\"}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectPercentile\",\"params\":{\"percentile\":89}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":98,\"n_neighbors\":149,\"p\":3,\"weights\":\"uniform\"}}}",
+        "generation": 1,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            17,
+            10
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "PolynomialFeatures",
+                "params": {
+                    "degree": 2,
+                    "interaction_only": "False",
+                    "include_bias": "True"
+                }
+            },
+            "feature_selection": {
+                "name": "SelectPercentile",
+                "params": {
+                    "percentile": 89
+                }
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 149,
+                    "weights": "uniform",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 98,
+                    "p": 3
+                }
+            }
+        },
+        "train_performance": 0.6392645372285767,
+        "val_performance": 0.614151438132861,
+        "error": false
+    },
+    {
+        "id": 21,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            19,
+            19
+        ],
+        "ei": 1.6138307654348356,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956542709748136,
+        "val_performance": 0.7501091058901902,
+        "error": false
+    },
+    {
+        "id": 22,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.9745583633981532,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            19,
+            19
+        ],
+        "ei": 1.6138307654348356,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.9745583633981532,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.995504855091362,
+        "val_performance": 0.7480557453530207,
+        "error": false
+    },
+    {
+        "id": 23,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            12,
+            12
+        ],
+        "ei": 1.6138307654348356,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958697407240674,
+        "val_performance": 0.7525056774389786,
+        "error": false
+    },
+    {
+        "id": 24,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            14,
+            19
+        ],
+        "ei": 1.6138307654348356,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956542709748136,
+        "val_performance": 0.7501091058901902,
+        "error": false
+    },
+    {
+        "id": 25,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"log_loss\",\"max_depth\":26,\"max_features\":0.8976831416029117,\"max_samples\":0.49367150458566045,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            15,
+            15
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "log_loss",
+                    "max_depth": 26,
+                    "max_features": 0.8976831416029117,
+                    "max_samples": 0.49367150458566045,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 0.9996021870179863,
+        "val_performance": 0.8093349218236193,
+        "error": false
+    },
+    {
+        "id": 26,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0006282563215639765}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            19,
+            19
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0006282563215639765
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9934989276451229,
+        "val_performance": 0.7330661150902923,
+        "error": false
+    },
+    {
+        "id": 27,
+        "key": "{\"feature_engineering\":{\"name\":\"PCA\",\"params\":{\"n_components\":0.9903712403853924,\"whiten\":\"False\"}},\"feature_scaling\":{\"name\":\"Normalizer\",\"params\":{\"norm\":\"l2\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"KNN\",\"params\":{\"algorithm\":\"ball_tree\",\"leaf_size\":66,\"n_neighbors\":139,\"p\":2,\"weights\":\"distance\"}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            18,
+            18
+        ],
+        "ei": 0.0043928530007351085,
+        "genome": {
+            "feature_scaling": {
+                "name": "Normalizer",
+                "params": {
+                    "norm": "l2"
+                }
+            },
+            "feature_engineering": {
+                "name": "PCA",
+                "params": {
+                    "n_components": 0.9903712403853924,
+                    "whiten": "False"
+                }
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "KNN",
+                "params": {
+                    "n_neighbors": 139,
+                    "weights": "distance",
+                    "algorithm": "ball_tree",
+                    "leaf_size": 66,
+                    "p": 2
+                }
+            }
+        },
+        "train_performance": 1.0,
+        "val_performance": 0.6081446189371917,
+        "error": false
+    },
+    {
+        "id": 28,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            10,
+            12
+        ],
+        "ei": 1.6138307654348356,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957125312814643,
+        "val_performance": 0.7506432621248014,
+        "error": false
+    },
+    {
+        "id": 29,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"Normalizer\",\"params\":{\"norm\":\"l1\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005712350231799579}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8976831416029117,\"max_samples\":0.49367150458566045,\"n_estimators\":324}}}",
+        "generation": 1,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            11,
+            15
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "Normalizer",
+                "params": {
+                    "norm": "l1"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005712350231799579
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8976831416029117,
+                    "max_samples": 0.49367150458566045,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 0.9992160697520596,
+        "val_performance": 0.730719217288758,
+        "error": false
+    },
+    {
+        "id": 30,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            21,
+            21
+        ],
+        "ei": 2.013613192002281,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956542709748136,
+        "val_performance": 0.7501091058901902,
+        "error": false
+    },
+    {
+        "id": 31,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.5593738682361031,\"n_estimators\":302}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            21,
+            21
+        ],
+        "ei": 2.013613192002281,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 302,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.5593738682361031,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9997042048413178,
+        "val_performance": 0.745737278219743,
+        "error": false
+    },
+    {
+        "id": 32,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":25,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            23,
+            23
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 25,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958508043242645,
+        "val_performance": 0.7522768521002675,
+        "error": false
+    },
+    {
+        "id": 33,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0006282563215639765}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            26,
+            23
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0006282563215639765
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9934989276451229,
+        "val_performance": 0.7330661150902923,
+        "error": false
+    },
+    {
+        "id": 34,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            26,
+            25
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9976146445354684,
+        "val_performance": 0.8034721222709372,
+        "error": false
+    },
+    {
+        "id": 35,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            24,
+            22
+        ],
+        "ei": 2.013613192002281,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956542709748136,
+        "val_performance": 0.7501091058901902,
+        "error": false
+    },
+    {
+        "id": 36,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            28,
+            23
+        ],
+        "ei": 2.195934748796236,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958697407240674,
+        "val_performance": 0.7525056774389786,
+        "error": false
+    },
+    {
+        "id": 37,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0005400166777461082}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":313}}}",
+        "generation": 2,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            21,
+            21
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0005400166777461082
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 313,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9935031782317578,
+        "val_performance": 0.7331362414942573,
+        "error": false
+    },
+    {
+        "id": 38,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            28,
+            25
+        ],
+        "ei": 2.013613192002281,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957125312814643,
+        "val_performance": 0.7506432621248014,
+        "error": false
+    },
+    {
+        "id": 39,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 2,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            22,
+            23
+        ],
+        "ei": 2.195934748796236,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957010765947534,
+        "val_performance": 0.7507763294777703,
+        "error": false
+    },
+    {
+        "id": 40,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            38,
+            38
+        ],
+        "ei": 4.177122131842776,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957010765947534,
+        "val_performance": 0.7507763294777703,
+        "error": false
+    },
+    {
+        "id": 41,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":30,\"max_features\":0.8156526825163682,\"max_samples\":0.513865880302325,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            32,
+            32
+        ],
+        "ei": 3.5773976138761183,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 30,
+                    "max_features": 0.8156526825163682,
+                    "max_samples": 0.513865880302325,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9994161868243608,
+        "val_performance": 0.7511478498756634,
+        "error": false
+    },
+    {
+        "id": 42,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.35970187719714714}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            39,
+            39
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.35970187719714714
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9967948602317733,
+        "val_performance": 0.8007311167856015,
+        "error": false
+    },
+    {
+        "id": 43,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":4,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            38,
+            38
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 4,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.7799343425773484,
+        "val_performance": 0.744673098987156,
+        "error": false
+    },
+    {
+        "id": 44,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.03751289432261751}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":25,\"max_features\":0.8276370533016777,\"max_samples\":0.5529982781846449,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "crossover_mutation",
+        "parent_ids": [
+            32,
+            35
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.03751289432261751
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 25,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.5529982781846449,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9997126877279132,
+        "val_performance": 0.7473610543630451,
+        "error": false
+    },
+    {
+        "id": 45,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            36,
+            39
+        ],
+        "ei": 4.177122131842776,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957010765947534,
+        "val_performance": 0.7507763294777703,
+        "error": false
+    },
+    {
+        "id": 46,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":24,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            30,
+            36
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 24,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956428627872563,
+        "val_performance": 0.7502069121040635,
+        "error": false
+    },
+    {
+        "id": 47,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.7709899778801216,\"max_samples\":0.5796739524817289,\"n_estimators\":287}}}",
+        "generation": 3,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            36,
+            36
+        ],
+        "ei": 3.5773976138761183,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 287,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.7709899778801216,
+                    "max_samples": 0.5796739524817289,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9998996293554889,
+        "val_performance": 0.7463762679503205,
+        "error": false
+    },
+    {
+        "id": 48,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            36,
+            39
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958697407240674,
+        "val_performance": 0.7525056774389786,
+        "error": false
+    },
+    {
+        "id": 49,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":25,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 3,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            36,
+            32
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 25,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958508043242645,
+        "val_performance": 0.7522768521002675,
+        "error": false
+    },
+    {
+        "id": 50,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"False\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":25,\"max_features\":0.6155452933087293,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "tpe",
+        "operation": "crossover_mutation",
+        "parent_ids": [
+            49,
+            49
+        ],
+        "ei": 31.421732593758055,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "False",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 25,
+                    "max_features": 0.6155452933087293,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9961432732750323,
+        "val_performance": 0.7516206980440269,
+        "error": false
+    },
+    {
+        "id": 51,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":30,\"max_features\":0.8156526825163682,\"max_samples\":0.513865880302325,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            42,
+            41
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 30,
+                    "max_features": 0.8156526825163682,
+                    "max_samples": 0.513865880302325,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9994161868243608,
+        "val_performance": 0.7511478498756634,
+        "error": false
+    },
+    {
+        "id": 52,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            42,
+            49
+        ],
+        "ei": 27.971049203964228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958697407240674,
+        "val_performance": 0.7525056774389786,
+        "error": false
+    },
+    {
+        "id": 53,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"passthrough\",\"params\":{}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced_subsample\",\"criterion\":\"log_loss\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "tpe",
+        "operation": "mutation",
+        "parent_ids": [
+            42,
+            42
+        ],
+        "ei": 1.106724657650739,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "log_loss",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced_subsample"
+                }
+            }
+        },
+        "train_performance": 0.9976456188478927,
+        "val_performance": 0.8108321984832945,
+        "error": false
+    },
+    {
+        "id": 54,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"log_loss\",\"max_depth\":25,\"max_features\":0.999899999999,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "tpe",
+        "operation": "crossover_mutation",
+        "parent_ids": [
+            49,
+            40
+        ],
+        "ei": 45.01036400419713,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "log_loss",
+                    "max_depth": 25,
+                    "max_features": 0.999899999999,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9956307500447155,
+        "val_performance": 0.7542052557329819,
+        "error": false
+    },
+    {
+        "id": 55,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.35970187719714714}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "random",
+        "operation": "crossover",
+        "parent_ids": [
+            42,
+            42
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.35970187719714714
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9967948602317733,
+        "val_performance": 0.8007311167856015,
+        "error": false
+    },
+    {
+        "id": 56,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.0032557235793735043}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"log_loss\",\"max_depth\":26,\"max_features\":0.8201273708307245,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            48,
+            48
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.0032557235793735043
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "log_loss",
+                    "max_depth": 26,
+                    "max_features": 0.8201273708307245,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9946362025012071,
+        "val_performance": 0.7456291902375783,
+        "error": false
+    },
+    {
+        "id": 57,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.049999999999000004}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "tpe",
+        "operation": "crossover",
+        "parent_ids": [
+            42,
+            41
+        ],
+        "ei": 27.971049203964228,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.049999999999000004
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9958697407240674,
+        "val_performance": 0.7525056774389786,
+        "error": false
+    },
+    {
+        "id": 58,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"SelectFwe\",\"params\":{\"alpha\":0.036339287044567396}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            45,
+            45
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "SelectFwe",
+                "params": {
+                    "alpha": 0.036339287044567396
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.9957010765947534,
+        "val_performance": 0.7507763294777703,
+        "error": false
+    },
+    {
+        "id": 59,
+        "key": "{\"feature_engineering\":{\"name\":\"passthrough\",\"params\":{}},\"feature_scaling\":{\"name\":\"StandardScaler\",\"params\":{\"with_mean\":\"True\",\"with_std\":\"False\"}},\"feature_selection\":{\"name\":\"VarianceThreshold\",\"params\":{\"threshold\":0.45247918997717124}},\"predictor\":{\"name\":\"RF\",\"params\":{\"class_weight\":\"balanced\",\"criterion\":\"gini\",\"max_depth\":26,\"max_features\":0.8276370533016777,\"max_samples\":0.40921729654188743,\"n_estimators\":324}}}",
+        "generation": 4,
+        "construction": "random",
+        "operation": "mutation",
+        "parent_ids": [
+            42,
+            42
+        ],
+        "ei": -Infinity,
+        "genome": {
+            "feature_scaling": {
+                "name": "StandardScaler",
+                "params": {
+                    "with_mean": "True",
+                    "with_std": "False"
+                }
+            },
+            "feature_engineering": {
+                "name": "passthrough",
+                "params": {}
+            },
+            "feature_selection": {
+                "name": "VarianceThreshold",
+                "params": {
+                    "threshold": 0.45247918997717124
+                }
+            },
+            "predictor": {
+                "name": "RF",
+                "params": {
+                    "n_estimators": 324,
+                    "criterion": "gini",
+                    "max_depth": 26,
+                    "max_features": 0.8276370533016777,
+                    "max_samples": 0.40921729654188743,
+                    "class_weight": "balanced"
+                }
+            }
+        },
+        "train_performance": 0.996925915119259,
+        "val_performance": 0.7976298116718403,
+        "error": false
+    }
+]
