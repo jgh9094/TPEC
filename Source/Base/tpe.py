@@ -75,6 +75,20 @@ class MultivariateKDE:
         # Returns an array of shape (m,), corresponding to 1 density value per point
         return np.maximum(self.kde.pdf(vec), self.eps)
 
+    def logpdf(self, vec: Union[np.ndarray, List]) -> np.ndarray:
+        """
+        Evaluate the KDE log probability density at given points.
+
+        Parameters:
+        - vec : array-like, shape (d,) or (d, m)
+            Points at which to evaluate the log density. Can be a single d-dimensional point
+            or multiple points as columns in a (d, m) array.
+        """
+        vec = np.asarray(vec)
+        if vec.ndim == 1:
+            vec = vec[:, None]
+        return self.kde.logpdf(vec)
+
     def sample(self, rng: np.random.Generator, n_samples: int = 1) -> np.ndarray:
         """
         Sample 'n_samples' new points from the estimated distribution.
@@ -170,17 +184,16 @@ class ParamGroupModel:
         """
         Sum of available good/bad log-density ratios for a candidate's parameter values.
 
-        The numeric KDEs (if available) contribute one joint ``log l - log g`` term; each
-        categorical PMF contributes its own ``log l - log g``. Both the KDE ``pdf`` and PMF
-        ``pmf`` floor their outputs at a small epsilon, so the logs are always finite.
+        The numeric KDEs (if available) contribute one joint ``log l - log g`` term, evaluated
+        directly in log space so the ratio stays informative far into the density tails; each
+        categorical PMF contributes its own ``log l - log g``, with ``pmf`` flooring its output
+        at a small epsilon so those logs are always finite.
         """
         score = 0.0
         if self.multi_l is not None and self.multi_g is not None and self.numeric_names:
             num_vals = [params[name] for name in self.numeric_names]
-            # pdf returns a length-1 array for a single point; take the scalar for the log.
-            l_num = float(self.multi_l.pdf(num_vals)[0])
-            g_num = float(self.multi_g.pdf(num_vals)[0])
-            score += float(np.log(l_num) - np.log(g_num))
+            # logpdf returns a length-1 array for a single point; take the scalar.
+            score += float(self.multi_l.logpdf(num_vals)[0] - self.multi_g.logpdf(num_vals)[0])
         for name, pmf_l in self.cat_l.items():
             score += float(np.log(pmf_l.pmf(params[name])) - np.log(self.cat_g[name].pmf(params[name])))
         return score
