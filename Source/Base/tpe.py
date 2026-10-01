@@ -169,12 +169,22 @@ class ParamGroupModel:
     """
     def __init__(self, numeric_names: List[str],
                  multi_l: Optional[MultivariateKDE], multi_g: Optional[MultivariateKDE],
-                 cat_l: Dict[str, CategoricalPMF], cat_g: Dict[str, CategoricalPMF]):
+                 cat_l: Dict[str, CategoricalPMF], cat_g: Dict[str, CategoricalPMF],
+                 log_names: Optional[Iterable[str]] = None):
         self.numeric_names = numeric_names  # order of dimensions in the numeric KDEs
         self.multi_l = multi_l              # good numeric KDE (None if unavailable)
         self.multi_g = multi_g              # bad numeric KDE (None if unavailable)
         self.cat_l = cat_l                  # {param: good PMF}
         self.cat_g = cat_g                  # {param: bad PMF}
+        self.log_names = set(log_names or ())  # numeric params modeled on a log scale
+
+    def numeric_vector(self, params: Dict[str, Any]) -> List[float]:
+        """
+        Numeric parameter values in KDE dimension order, with ``log``-flagged parameters mapped
+        to their natural logarithm so the KDE models them on the scale they are sampled on.
+        """
+        return [float(np.log(params[name])) if name in self.log_names else float(params[name])
+                for name in self.numeric_names]
 
     def has_evidence(self) -> bool:
         """True if at least one density model (numeric KDE or any categorical PMF) was fit."""
@@ -191,7 +201,7 @@ class ParamGroupModel:
         """
         score = 0.0
         if self.multi_l is not None and self.multi_g is not None and self.numeric_names:
-            num_vals = [params[name] for name in self.numeric_names]
+            num_vals = self.numeric_vector(params)
             # logpdf returns a length-1 array for a single point; take the scalar.
             score += float(self.multi_l.logpdf(num_vals)[0] - self.multi_g.logpdf(num_vals)[0])
         for name, pmf_l in self.cat_l.items():
@@ -335,14 +345,18 @@ class BaseTPE(ABC):
         """
         numeric_names = [n for n, s in param_specs.items() if s["type"] in ("int", "float")]
         cat_names = [n for n, s in param_specs.items() if s["type"] in ("cat", "bool")]
+        log_names = {n for n in numeric_names if param_specs[n].get("log", False)}
+
+        def numeric_row(name, dicts):
+            return [float(np.log(d[name])) if name in log_names else float(d[name]) for d in dicts]
 
         multi_l = multi_g = None
         if numeric_names:
             d = len(numeric_names)
             # MultivariateKDE requires strictly more samples than dimensions in each group.
             if len(good_param_dicts) > d and len(bad_param_dicts) > d:
-                good_arr = np.array([[gd[n] for gd in good_param_dicts] for n in numeric_names], dtype=float)
-                bad_arr = np.array([[bd[n] for bd in bad_param_dicts] for n in numeric_names], dtype=float)
+                good_arr = np.array([numeric_row(n, good_param_dicts) for n in numeric_names], dtype=float)
+                bad_arr = np.array([numeric_row(n, bad_param_dicts) for n in numeric_names], dtype=float)
                 try:
                     multi_l = MultivariateKDE(good_arr, rng)
                     multi_g = MultivariateKDE(bad_arr, rng)
@@ -358,7 +372,7 @@ class BaseTPE(ABC):
                 cat_l[n] = CategoricalPMF([gd[n] for gd in good_param_dicts], bounds)
                 cat_g[n] = CategoricalPMF([bd[n] for bd in bad_param_dicts], bounds)
 
-        model = ParamGroupModel(numeric_names, multi_l, multi_g, cat_l, cat_g)
+        model = ParamGroupModel(numeric_names, multi_l, multi_g, cat_l, cat_g, log_names)
         return model if model.has_evidence() else None
 
     @abstractmethod

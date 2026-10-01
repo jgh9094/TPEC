@@ -104,7 +104,7 @@ class ModelParams(ABC):
         95% of increases/decreases will be within 2*var of the current value
         99.7% of increases/decreases will be within 3*var of the current value
         """
-        value = float(cur_value * rng.normal(1.0, var))
+        value = float(cur_value * np.exp(rng.normal(0.0, var)))
 
         # ensure the value is within the bounds, clip to safe boundaries
         eps = 1e-12
@@ -117,7 +117,7 @@ class ModelParams(ABC):
         95% of increases/decreases will be within 2*var of the current value
         99.7% of increases/decreases will be within 3*var of the current value
         """
-        value = int(cur_value * rng.normal(1.0, var))
+        value = int(round(cur_value * np.exp(rng.normal(0.0, var))))
 
         # ensure the value is within the bounds
         if value < min:
