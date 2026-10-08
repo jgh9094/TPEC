@@ -1,11 +1,6 @@
-Data/Raw_OpenML_Suite_271_Binary_Classification
-Data/*.tar.gz
-Data/Timing
-Data/timing.tar.gz
+Data/
 Source/__pycache__/
-Source/HPO/__pycache__/
-Source/Base/__pycache__/
-Source/CASH/__pycache__/
+Source/*/__pycache__/
 main.py
 example.py
 Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
@@ -13,4 +8,6 @@ Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
 .vscode/
 .claude/
 Results/
-Experiments/Data-Preprocessing/open_ml.tar.gz
+Data-Tools/HPO/*/_book
+Results_*
+Test/
