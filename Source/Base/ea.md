@@ -187,7 +187,8 @@ example; CASH mirrors it):
    parent.
 
 4. **Select survivors + track best.** `_drop_errored` removes errored individuals from the
-   breeding pool (they stay in the archive). `update_best_seen` advances the scalar `best_perf`.
+   breeding pool (they stay in the archive). `update_best_seen` advances the scalar `best_perf` and, only on a strict
+   improvement, re-draws the held `best_entry` via `Archive.best(self.rng)`.
 
 5. **Breed.** For each generation: `variation_order()` decides the per-offspring operators and
    parent count → `parent_selection()` runs tournaments over validation performance →
@@ -196,8 +197,8 @@ example; CASH mirrors it):
    `mutate_parameters_random` (explore) and tag each child's provenance via `_build_offspring`.
    Then back to step 2 with the offspring.
 
-6. **Finish.** After the last generation, `_select_best()` draws the winner from
-   `Archive.best(self.rng)`, rebuilds it with `build_individual`, and `model_test_evaluation`
+6. **Finish.** After the last generation, `_select_best()` takes the held `best_entry`
+   (no new draw), rebuilds it with `build_individual`, and `model_test_evaluation`
    fits it on the full training split and scores the held-out test set. `save_results` /
    `save_archive` serialize the result and `Archive.to_records()`.
 

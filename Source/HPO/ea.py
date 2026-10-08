@@ -32,6 +32,7 @@ from Source.HPO.individual import HPOIndividual
 from Source.HPO.tpe import HPO_TPE
 from Source.HPO.archive import HPOArchive
 from Source.Base.archive import (
+    ArchiveEntry,
     RANDOM_CONSTRUCTION, TPE_CONSTRUCTION,
     MUTATION_OPERATION, CROSSOVER_OPERATION, CROSSOVER_MUTATION_OPERATION,
 )
@@ -157,15 +158,18 @@ class EA(BaseEA):
         self.eval_archive: Optional[HPOArchive] = None
         self.hard_eval_count = 0
         self.best_perf = float("-inf")
+        # archive entry currently held as the best-so-far; re-drawn (with the archive's tie-break)
+        # only when a generation strictly improves ``best_perf``, so ties found later never replace it
+        self.best_entry: Optional[ArchiveEntry] = None
         # final selected result (genotype + train/val/test), populated at the end of evolve() from
-        # the provenance archive and consumed by save_results(); no running best-individual is kept
+        # the held ``best_entry`` and consumed by save_results()
         self.best_result: Optional[Dict[str, Any]] = None
 
         # per-generation checkpoints: test-set performance of the best-so-far individual,
         # recorded across generations so a checkpoint can stand in for a shorter run
         self.checkpoints: List[dict] = []
         # genome key of the most recent checkpoint's selected best, so a full-model test refit is
-        # skipped when the drawn best is genome-identical to the previous checkpoint's
+        # skipped when the held best is genome-identical to the previous checkpoint's
         self._last_ckpt_key: Optional[str] = None
 
         return
@@ -296,10 +300,10 @@ class EA(BaseEA):
         # the best validation performance found across the whole run
         print(f"Best validation performance found: {self.best_perf}", flush=True)
 
-        # The returned individual is drawn from the archive with a random tie-break (``_select_best``).
-        # When checkpointing ran, the final checkpoint already made this draw and stashed it in
-        # ``self.best_result``; reuse it so the saved result matches the last checkpoint exactly.
-        # Otherwise (no checkpointing) draw and evaluate once here.
+        # The returned individual is the held best entry (``_select_best``), fixed whenever the best
+        # score last strictly improved. When checkpointing ran, the final checkpoint already evaluated
+        # it and stashed it in ``self.best_result``; reuse it so the saved result matches the last
+        # checkpoint exactly. Otherwise (no checkpointing) evaluate it once here.
         if self.best_result is None:
             best_individual, best_val = self._select_best()
             train_score, test_score = self.model_test_evaluation(best_individual)
@@ -661,43 +665,73 @@ class EA(BaseEA):
 
     def update_best_seen(self, individuals: List[Individual]) -> None:
         """
-        Update the best validation performance seen across all generations.
+        Update the best validation performance seen across all generations, and the held best entry.
 
-        Only the scalar best-so-far performance is tracked; the winning individual itself is
-        recovered from the provenance archive when needed (checkpoints, final selection), so no
-        running copy is kept here.
+        The whole batch is scanned first; only if some individual strictly beats ``best_perf`` is the
+        held best re-drawn from the provenance archive (``Archive.best``: top validation, earliest
+        generation, then a uniform random tie-break with ``self.rng``). A later individual that merely ties
+        the current best never replaces it, so the held best is the first one to reach that score.
+        Call this after ``record_history`` so the batch is already archived.
 
         Args:
-            individuals (List[Individual]): List of individuals to check.
+            individuals (List[Individual]): Individuals to check.
         """
+        improved = False
         for ind in individuals:
             perf = ind.get_val_performance()
             if perf > self.best_perf:
                 self.best_perf = perf
+                improved = True
+
+        if improved:
+            assert self.eval_archive is not None, "No archive to select the best individual from."
+            self.best_entry = self.eval_archive.best(self.rng)
+            # consistency guard: the archive's best validation must match the tracked best-so-far
+            assert self.best_entry is not None and self.best_entry.val_performance == self.best_perf, (
+                f"Archive best validation "
+                f"({None if self.best_entry is None else self.best_entry.val_performance}) does not "
+                f"match the best validation performance tracked during the run ({self.best_perf})."
+            )
+            # alignment guard: a strict improvement can only come from this batch, so the archive's
+            # pick must be an entry recorded for this batch. ``tied`` holds every individual in the
+            # batch that reached the new best; several may tie, which is expected.
+            tied = [ind for ind in individuals if ind.get_val_performance() == self.best_perf]
+            # id check: record_history gives every individual in the batch its own fresh archive id,
+            # so exactly one tied individual must carry the drawn entry's id (whatever the number of
+            # ties). 0 matches -> the archive drew an entry outside this batch (e.g. an earlier
+            # genome-identical entry); 2+ matches -> two individuals share an id (e.g. the same
+            # object appears twice in the batch, so its id was overwritten).
+            matched = [ind for ind in tied if ind.archive_id == self.best_entry.id]
+            assert len(matched) == 1, (
+                f"Archive best (id {self.best_entry.id}, generation {self.best_entry.generation}) "
+                f"matches {len(matched)} of the {len(tied)} individual(s) in this batch that tied the "
+                f"new best validation performance ({self.best_perf}); expected exactly one "
+                f"(tied archive ids: {[ind.archive_id for ind in tied]})."
+            )
+            # genome check: the matched individual's current genome must still equal the genome
+            # the archive deep-copied at record time; a mismatch means it was modified afterwards.
+            assert self.eval_archive.compute_key(matched[0]) == self.best_entry.key, (
+                f"Individual with archive id {self.best_entry.id} no longer carries the genome "
+                f"recorded in the archive."
+            )
+        return
 
     def _select_best(self) -> Tuple[HPOIndividual, float]:
         """
-        Draw the current best individual from the provenance archive, breaking validation ties
-        uniformly at random with ``self.rng``, and return it (with its validation performance set)
-        alongside that validation score.
+        Return the held best-so-far individual (rebuilt from ``self.best_entry``, with its validation
+        performance set) alongside its validation score.
 
-        Both the per-generation checkpoint and the final evaluation select through here, so a
-        checkpoint recorded at a given evaluation budget is drawn by exactly the same rule as a full
-        run that stops at that budget -- which is what lets a checkpoint stand in for a shorter run
-        without re-running. Because the draw consumes ``self.rng``, enabling checkpointing shifts the
-        search trajectory relative to a run with checkpointing off.
+        No draw happens here: the tie-break is made once, in ``update_best_seen``, when the best
+        score strictly improves. Both the per-generation checkpoint and the final evaluation select
+        through here, so a checkpoint recorded at a given evaluation budget holds exactly what a full
+        run stopping at that budget would return, and enabling checkpointing does not consume
+        ``self.rng`` or shift the search trajectory.
         """
         assert self.eval_archive is not None, "No archive to select the best individual from."
-        best_entry = self.eval_archive.best(self.rng)
-        assert best_entry is not None and best_entry.val_performance is not None, \
-            "Archive holds no scoreable individual to select."
-        best_val = float(best_entry.val_performance)
-        # consistency guard: the archive's best validation must match the tracked best-so-far
-        assert best_val == self.best_perf, (
-            f"Archive best validation ({best_val}) does not match the best "
-            f"validation performance tracked during the run ({self.best_perf})."
-        )
-        best_individual = self.eval_archive.build_individual(best_entry)
+        assert self.best_entry is not None and self.best_entry.val_performance is not None, \
+            "No best entry held yet; update_best_seen must run on a scored batch first."
+        best_val = float(self.best_entry.val_performance)
+        best_individual = self.eval_archive.build_individual(self.best_entry)
         best_individual.set_val_performance(best_val)
         return best_individual, best_val
 
@@ -707,12 +741,12 @@ class EA(BaseEA):
 
         This is a diagnostic aid: it lets us watch how the held-out (test) performance of the
         best-validation individual evolves generation by generation, and lets a checkpoint stand in
-        for a run that stops at that evaluation budget. The individual is drawn from the archive
-        via ``_select_best`` -- the SAME random tie-break used for the final result -- so the final
+        for a run that stops at that evaluation budget. The individual is the held best entry from
+        ``_select_best`` -- the SAME selection used for the final result -- so the final
         checkpoint's selection is exactly what ``evolve`` returns.
 
-        To avoid redundant full-model refits, the drawn best is only re-evaluated on the test set
-        when its genome differs from the previous checkpoint's; a genome-identical draw reuses the
+        To avoid redundant full-model refits, the held best is only re-evaluated on the test set
+        when its genome differs from the previous checkpoint's; a genome-identical best reuses the
         previous scores (they still describe that same genome).
 
         Args:
@@ -724,11 +758,11 @@ class EA(BaseEA):
         if checkpoint_dir is None:
             return
 
-        # draw the current best with the same random tie-break used for the final result
+        # the held best-so-far, the same selection used for the final result
         assert self.eval_archive is not None, "No archive to checkpoint from."
         best_individual, best_val = self._select_best()
 
-        # refit on the test set only when the drawn genome changed since the previous checkpoint
+        # refit on the test set only when the held best changed since the previous checkpoint
         ckpt_key = self.eval_archive.compute_key(best_individual)
         if self.checkpoints and self._last_ckpt_key == ckpt_key:
             train_score = self.checkpoints[-1]["train_auc"]

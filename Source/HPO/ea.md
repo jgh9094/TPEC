@@ -123,8 +123,8 @@ base preprocessor must fully numericize *and* scale: `StandardScaler` on numeric
      (if `tpe_prob > 0`) and calls `mutate`/`crossover` per the variation order.
    - `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen` →
      `checkpoint_best_seen`.
-7. **Finish** — draw the best via `_select_best`, run `model_test_evaluation`, store
-   `best_result`. If checkpointing ran, the final checkpoint already made that draw and stashed it,
+7. **Finish** — take the held best via `_select_best`, run `model_test_evaluation`, store
+   `best_result`. If checkpointing ran, the final checkpoint already evaluated it and stashed it,
    so it's reused verbatim.
 
 ### `evaluation()` — dedup, dispatch, finalize
@@ -179,17 +179,20 @@ minimizes; the EA maximizes). Errored individuals negate their penalty into the 
 
 ### Selection, checkpoints, final test
 
-`update_best_seen` ([ea.py:662](Source/HPO/ea.py#L662)) tracks only the scalar `best_perf`; the
-winning individual is recovered from the archive on demand.
+`update_best_seen` ([ea.py:666](Source/HPO/ea.py#L666)) scans the whole batch and advances the
+scalar `best_perf`. Only when the batch **strictly** improves it does it re-draw the held
+`best_entry` via `eval_archive.best(self.rng)` (top validation score, then earliest generation, then
+random tie-break); later individuals that merely tie the best never replace it.
 
-`_select_best` ([ea.py:678](Source/HPO/ea.py#L678)) draws `eval_archive.best(self.rng)` (random
-tie-break), rebuilds it, and asserts its validation equals `best_perf`.
+`_select_best` ([ea.py:697](Source/HPO/ea.py#L697)) makes no draw: it rebuilds the held
+`best_entry` with its validation performance set. Because the only `rng` draw happens in
+`update_best_seen`, checkpointing does not shift the search trajectory.
 
-`checkpoint_best_seen` ([ea.py:704](Source/HPO/ea.py#L704)) — if `checkpoint_dir` is set, after
-each generation it draws the best via the **same** `_select_best`, evaluates it on the test set
-(skipping the refit when the drawn genome is unchanged from the last checkpoint), appends a row to
+`checkpoint_best_seen` ([ea.py:716](Source/HPO/ea.py#L716)) — if `checkpoint_dir` is set, after
+each generation it takes the best via the **same** `_select_best`, evaluates it on the test set
+(skipping the refit when the held genome is unchanged from the last checkpoint), appends a row to
 `checkpoints.csv`, writes a `results_eval_N.json` snapshot (N = candidates considered =
-`len(eval_archive)`), and stashes the draw in `best_result` so the final result matches the last
+`len(eval_archive)`), and stashes the selection in `best_result` so the final result matches the last
 checkpoint exactly.
 
 `model_test_evaluation` ([ea.py:990](Source/HPO/ea.py#L990)) fits the base preprocessor on the full

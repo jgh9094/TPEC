@@ -294,19 +294,26 @@ class Archive(ABC):
 
     def best(self, rng: np.random.Generator) -> Optional[ArchiveEntry]:
         """
-        Return a best-scoring entry: the one with the highest validation performance
-        (errored/unscored entries excluded), or None if nothing scoreable has been archived.
+        Return a best-scoring entry, or None if nothing scoreable has been archived
+        (errored/unscored entries are excluded).
 
-        When several entries tie for the highest validation performance, one of them is chosen
-        uniformly at random using ``rng`` so that no entry is systematically favored (e.g. the
-        earliest inserted). Pass the EA's generator to keep the choice reproducible.
+        Selection is a three-stage filter:
+          1. keep every entry with the highest validation performance;
+          2. among those, keep only the entries from the earliest generation (the initial
+             population is generation -1), so the reported best reflects how early the search
+             first reached that score;
+          3. pick one of the remaining entries uniformly at random using ``rng``, so that no
+             entry within that generation is systematically favored. Pass the EA's generator
+             to keep the choice reproducible.
         """
         scored = [(e, e.val_performance) for e in self._entries
                   if not e.error and e.val_performance is not None]
         if not scored:
             return None
         best_val = max(val for _, val in scored)
-        tied = [e for e, val in scored if val == best_val]
+        top = [e for e, val in scored if val == best_val]
+        earliest_gen = min(e.generation for e in top)
+        tied = [e for e in top if e.generation == earliest_gen]
         return tied[int(rng.integers(len(tied)))]
 
     def to_records(self) -> List[Dict[str, Any]]:

@@ -197,9 +197,10 @@ minimizes; the EA maximizes). Errored pipelines negate into the "bad" group.
 
 ### Selection, checkpoints, final test
 
-`_select_best` ([ea.py:1049](Source/CASH/ea.py#L1049)), `checkpoint_best_seen`
-([ea.py:1075](Source/CASH/ea.py#L1075)), and `model_test_evaluation`
-([ea.py:1393](Source/CASH/ea.py#L1393)) parallel HPO but operate on pipelines: the final test refit
+`update_best_seen` ([ea.py:1035](Source/CASH/ea.py#L1035)), `_select_best`
+([ea.py:1066](Source/CASH/ea.py#L1066)), `checkpoint_best_seen`
+([ea.py:1085](Source/CASH/ea.py#L1085)), and `model_test_evaluation`
+([ea.py:1403](Source/CASH/ea.py#L1403)) parallel HPO but operate on pipelines: the final test refit
 fits the base preprocessor on the full train split, assembles the winning pipeline via
 `_resolve_pipeline_steps` + `assemble_steps` (same steps as CV, passthrough omitted, scaler
 numeric-aware), fits, and scores train + test. Checkpoints and `best_results.json` additionally
