@@ -123,27 +123,27 @@ if __name__ == "__main__":
     print("=" * 60, flush=True)
     print('', flush=True)
 
-    # # initialize ray
-    # if not ray.is_initialized():
-    #     ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True)
-    # print(f"Ray initialized with {args.cores} cores.", flush=True)
+    # initialize ray
+    if not ray.is_initialized():
+        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True)
+    print(f"Ray initialized with {args.cores} cores.", flush=True)
 
-    # # create EA
-    # ea = optimizer.EA(
-    #     seed=args.seed,
-    #     pop_size=args.pop_size,
-    #     cores=args.cores,
-    #     mut_prob=args.mut_prob,
-    #     mut_var=args.mut_var,
-    #     model=args.model,
-    #     tpe_prob=args.tpe_prob,
-    #     tournament_size=args.tournament_size,
-    #     num_offspring=args.num_offspring,
-    #     crossover_prob=args.crossover_prob,
-    #     classification=args.classification,
-    #     gamma=args.gamma
-    # )
-    # print(f"EA initalized", flush=True)
+    # create EA
+    ea = optimizer.EA(
+        seed=args.seed,
+        pop_size=args.pop_size,
+        cores=args.cores,
+        mut_prob=args.mut_prob,
+        mut_var=args.mut_var,
+        model=args.model,
+        tpe_prob=args.tpe_prob,
+        tournament_size=args.tournament_size,
+        num_offspring=args.num_offspring,
+        crossover_prob=args.crossover_prob,
+        classification=args.classification,
+        gamma=args.gamma
+    )
+    print(f"EA initalized", flush=True)
 
     X, y = load_modeling_data(dataset_directory=args.data_path)
 
@@ -160,22 +160,22 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unknown task '{args.task}'. Supported tasks: 'so' (spine opioid).")
 
-    # # load data
-    # ea.load_data_pd(
-    #     data=data_set,
-    #     target_label=args.y_label,
-    #     train_p=args.train_p,
-    #     one_hot_cols=one_hot_cols,
-    #     scalar_cols=scalar_cols,
-    #     n_folds=args.n_folds
-    # )
-    # print(f"EA data loaded", flush=True)
+    # load data
+    ea.load_data_pd(
+        data=data_set,
+        target_label=args.y_label,
+        train_p=args.train_p,
+        one_hot_cols=one_hot_cols,
+        scalar_cols=scalar_cols,
+        n_folds=args.n_folds
+    )
+    print(f"EA data loaded", flush=True)
 
-    # # run evolution (checkpoint best-so-far test performance each generation)
-    # ea.evolve(gens=args.gens, checkpoint_dir=args.output_directory)
+    # run evolution
+    ea.evolve(gens=args.gens)
 
-    # # save results
-    # ea.save_results(save_dir=args.output_directory)
+    # save results
+    ea.save_results(save_dir=args.output_directory)
 
-    # # shutdown ray
-    # ray.shutdown()
+    # shutdown ray
+    ray.shutdown()
