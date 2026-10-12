@@ -1,6 +1,5 @@
 Data/
-Source/__pycache__/
-Source/*/__pycache__/
+__pycache__/
 main.py
 example.py
 Experiments/Data-Preprocessing/Raw_OpenML_Suite_271_Classification
