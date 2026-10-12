@@ -247,7 +247,7 @@ class EA(BaseEA):
 
         # keep track of best
         self.update_best_seen(self.population)
-        print(f"Best performance so far (Gen 0): {self.best_perf}", flush=True)
+        print(f"Best performance so far (Gen -1): {self.best_perf}", flush=True)
 
         # Start evolution
         for g in range(gens):
@@ -273,7 +273,7 @@ class EA(BaseEA):
 
             # keep track of best
             self.update_best_seen(self.population)
-            print(f"Best performance so far (Gen {g+1}): {self.best_perf}", flush=True)
+            print(f"Best performance so far (Gen {g}): {self.best_perf}", flush=True)
 
         # save total runtime for the run (minutes)
         self.total_time_minutes = (time.time() - start_time) / 60
@@ -289,16 +289,25 @@ class EA(BaseEA):
         # score last strictly improved. Fit it on the full training set and score it on the test set.
         best_individual, best_val = self._select_best()
         train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+        # 1-based position of the best entry among all candidates considered (duplicates included),
+        # matching the Optuna runner's best_eval (trial.number + 1)
+        best_eval = self.best_entry.id + 1
+        # generation that produced the best entry, as recorded in archive.json (-1 = initial population)
+        best_generation = self.best_entry.generation
         self.best_result = {
             "genotype": best_individual.get_genotype(),
             "train_performance": train_score,
             "val_performance": best_val,
             "test_performance": test_score,
             "complexity": complexity,
+            "best_eval": best_eval,
+            "best_generation": best_generation,
         }
 
         print(f"Final test evaluation - Train: {train_score}, Val: {self.best_perf}, "
               f"Test: {test_score}, Complexity: {complexity}", flush=True)
+        print(f"Best individual found at evaluation {best_eval}/{len(self.eval_archive)} "
+              f"(generation {best_generation})", flush=True)
 
         return
 
@@ -1061,6 +1070,8 @@ class EA(BaseEA):
             "validation_accuracy": float(self.best_perf),
             "test_accuracy": self.best_result["test_performance"],
             "complexity": self.best_result["complexity"],
+            "best_eval": self.best_result["best_eval"],
+            "best_generation": self.best_result["best_generation"],
             "best_params": self.best_result["genotype"],
         }
 

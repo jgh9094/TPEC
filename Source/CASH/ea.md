@@ -205,8 +205,8 @@ numeric-aware), fits, and scores train + test. It also returns the fitted Pipeli
 `calculate_model_complexity` score ([Source/ML/complexity.py](Source/ML/complexity.py)): the
 predictor's parameter count, plus 1 per transformer/scaler step and 0 per selector; the fixed base
 preprocessor is not counted. `best_results.json` additionally records the winning `architecture`
-(via `get_architecture()`) and `complexity`. `save_results` ([ea.py:1394](Source/CASH/ea.py#L1394))
-writes `best_results.json` and `archive.json`.
+(via `get_architecture()`), `complexity`, `best_eval`, and `best_generation` (as in HPO).
+`save_results` ([ea.py:1402](Source/CASH/ea.py#L1402)) writes `best_results.json` and `archive.json`.
 
 ---
 

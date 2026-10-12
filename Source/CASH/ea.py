@@ -768,6 +768,10 @@ class EA(BaseEA):
         # score last strictly improved. Fit it on the full training set and score it on the test set.
         best_individual, best_val = self._select_best()
         train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+        # 1-based position of the best entry among all candidates considered (duplicates included)
+        best_eval = self.best_entry.id + 1
+        # generation that produced the best entry, as recorded in archive.json (-1 = initial population)
+        best_generation = self.best_entry.generation
         self.best_result = {
             "architecture": best_individual.get_architecture(),
             "genotype": best_individual.get_genotype(),
@@ -775,10 +779,14 @@ class EA(BaseEA):
             "val_performance": best_val,
             "test_performance": test_score,
             "complexity": complexity,
+            "best_eval": best_eval,
+            "best_generation": best_generation,
         }
 
         print(f"Final test evaluation - Train: {train_score}, Val: {self.best_perf}, "
               f"Test: {test_score}, Complexity: {complexity}", flush=True)
+        print(f"Best pipeline found at evaluation {best_eval}/{len(self.eval_archive)} "
+              f"(generation {best_generation})", flush=True)
 
         return
 
@@ -1410,6 +1418,8 @@ class EA(BaseEA):
             "validation_accuracy": float(self.best_perf),
             "test_accuracy": self.best_result["test_performance"],
             "complexity": self.best_result["complexity"],
+            "best_eval": self.best_result["best_eval"],
+            "best_generation": self.best_result["best_generation"],
             "best_pipeline": self.best_result["genotype"],
         }
 

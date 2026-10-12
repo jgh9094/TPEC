@@ -192,8 +192,10 @@ scores train + held-out test (ROC-AUC or R²). It also returns the fitted estima
 `calculate_model_complexity` score ([Source/ML/complexity.py](Source/ML/complexity.py)); the fixed
 base preprocessor is not counted.
 
-`save_results` ([ea.py:1041](Source/HPO/ea.py#L1041)) writes `best_results.json` (including
-`complexity`) and calls `save_archive` to dump `eval_archive.to_records()` as `archive.json`.
+`save_results` ([ea.py:1050](Source/HPO/ea.py#L1050)) writes `best_results.json` (including
+`complexity`, `best_eval` = the best entry's 1-based position among all candidates considered, and
+`best_generation` = the generation that produced it, -1 for the initial population) and calls
+`save_archive` to dump `eval_archive.to_records()` as `archive.json`.
 
 ---
 
