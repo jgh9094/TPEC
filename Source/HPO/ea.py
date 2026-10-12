@@ -227,17 +227,12 @@ class EA(BaseEA):
         # the provenance archive rebuilds individuals from stored genomes, so it needs the model type
         self.eval_archive = HPOArchive(self.param_space.get_model_type())
 
-    def evolve(self, gens: int, checkpoint_dir: Optional[str] = None) -> None:
+    def evolve(self, gens: int) -> None:
         """
         Run the EA with parallelized fitness evaluations using Ray.
 
         Args:
             gens (int): Number of generations to evolve.
-            checkpoint_dir (Optional[str]): If provided, after every generation (starting with
-                the initial population, logged as Gen -1) the best-so-far individual is evaluated
-                on the test set and a row is appended to ``{checkpoint_dir}/checkpoints.csv``.
-                This is a diagnostic aid for watching how held-out performance evolves; it does
-                not affect the final result.
         """
 
         start_time = time.time()
@@ -259,10 +254,6 @@ class EA(BaseEA):
         # keep track of best
         self.update_best_seen(self.population)
         print(f"Best performance so far (Gen 0): {self.best_perf}", flush=True)
-
-        # checkpoint the best-so-far individual's test performance for the initial
-        # population (Gen -1, since evolution proper begins at Gen 0)
-        self.checkpoint_best_seen(generation=-1, checkpoint_dir=checkpoint_dir)
 
         # Start evolution
         for g in range(gens):
@@ -290,12 +281,12 @@ class EA(BaseEA):
             self.update_best_seen(self.population)
             print(f"Best performance so far (Gen {g+1}): {self.best_perf}", flush=True)
 
-            # checkpoint the best-so-far individual's test performance for this generation
-            self.checkpoint_best_seen(generation=g, checkpoint_dir=checkpoint_dir)
+        # save total runtime for the run (minutes)
+        self.total_time_minutes = (time.time() - start_time) / 60
 
         # make sure that the archive is the correct size
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
-        print(f"Total evolution time (mins): {(time.time() - start_time) / 60}", flush=True)
+        print(f"Total evolution time (mins): {self.total_time_minutes}", flush=True)
 
         # the best validation performance found across the whole run
         print(f"Best validation performance found: {self.best_perf}", flush=True)
@@ -735,91 +726,6 @@ class EA(BaseEA):
         best_individual.set_val_performance(best_val)
         return best_individual, best_val
 
-    def checkpoint_best_seen(self, generation: int, checkpoint_dir: Optional[str]) -> None:
-        """
-        Record the test-set performance of the best-so-far individual for one generation.
-
-        This is a diagnostic aid: it lets us watch how the held-out (test) performance of the
-        best-validation individual evolves generation by generation, and lets a checkpoint stand in
-        for a run that stops at that evaluation budget. The individual is the held best entry from
-        ``_select_best`` -- the SAME selection used for the final result -- so the final
-        checkpoint's selection is exactly what ``evolve`` returns.
-
-        To avoid redundant full-model refits, the held best is only re-evaluated on the test set
-        when its genome differs from the previous checkpoint's; a genome-identical best reuses the
-        previous scores (they still describe that same genome).
-
-        Args:
-            generation (int): Generation index (-1 for the initial population; evolution
-                proper starts at 0).
-            checkpoint_dir (Optional[str]): Directory to write ``checkpoints.csv`` into.
-                If None, checkpointing is disabled and this is a no-op.
-        """
-        if checkpoint_dir is None:
-            return
-
-        # the held best-so-far, the same selection used for the final result
-        assert self.eval_archive is not None, "No archive to checkpoint from."
-        best_individual, best_val = self._select_best()
-
-        # refit on the test set only when the held best changed since the previous checkpoint
-        ckpt_key = self.eval_archive.compute_key(best_individual)
-        if self.checkpoints and self._last_ckpt_key == ckpt_key:
-            train_score = self.checkpoints[-1]["train_auc"]
-            test_score = self.checkpoints[-1]["test_auc"]
-        else:
-            train_score, test_score = self.model_test_evaluation(best_individual)
-        self._last_ckpt_key = ckpt_key
-
-        self.checkpoints.append({
-            "generation": generation,
-            "hard_evals": self.hard_eval_count,
-            "val_auc": float(best_val),
-            "train_auc": float(train_score),
-            "test_auc": float(test_score),
-        })
-
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        csv_path = os.path.join(checkpoint_dir, "checkpoints.csv")
-        pd.DataFrame(self.checkpoints).to_csv(csv_path, index=False)
-
-        # snapshot of the best-so-far result at this many candidates considered, mirroring the
-        # best_results.json schema so progress can be tracked generation by generation. The budget
-        # index N in the filename is the total number of candidates considered so far -- the running
-        # sum of population size over generations -- which is exactly the archive length (every
-        # evaluated candidate, including redundant genomes, is recorded there). This is NOT
-        # ``hard_eval_count`` (distinct genomes actually fitted), which is <= candidates considered.
-        candidates_considered = len(self.eval_archive)
-        result_snapshot = {
-            "generation": generation,
-            "candidates_considered": candidates_considered,
-            "hard_evals": self.hard_eval_count,
-            "task_id": self.task_id,
-            "model_type": self.param_space.get_model_type(),
-            "seed": self.seed,
-            "train_accuracy": float(train_score),
-            "validation_accuracy": float(best_val),
-            "test_accuracy": float(test_score),
-            "best_params": best_individual.get_genotype(),
-        }
-        json_path = os.path.join(checkpoint_dir, f"results_eval_{candidates_considered}.json")
-        with open(json_path, 'w') as f:
-            json.dump(result_snapshot, f, indent=4)
-
-        # record this selection so the final evaluation returns exactly the last checkpoint
-        self.best_result = {
-            "genotype": best_individual.get_genotype(),
-            "train_performance": train_score,
-            "val_performance": best_val,
-            "test_performance": test_score,
-        }
-
-        print(f"Checkpoint (Gen {generation}) - Val {self.metric_name}: {self.best_perf:.4f}, "
-              f"Train {self.metric_name}: {train_score:.4f}, Test {self.metric_name}: {test_score:.4f} "
-              f"-> {json_path}", flush=True)
-
-        return
-
     def mutate(self, parent: Individual) -> HPOIndividual:
         """
         Produce one offspring from a single parent, owning the full TPE decision.
@@ -1174,6 +1080,12 @@ class EA(BaseEA):
 
         # save the full provenance archive of every evaluated individual
         self.save_archive(task_output_dir)
+
+        # save total runtime in .txt file
+        runtime_path = os.path.join(save_dir, "total_runtime_minutes.txt")
+        with open(runtime_path, 'w') as f:
+            f.write(f"{self.total_time_minutes}")
+        print(f"Total evolution time (mins) saved to: {runtime_path}", flush=True)
 
         return
 

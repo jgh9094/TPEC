@@ -351,7 +351,7 @@ class BaseEA(ABC):
         pass
 
     @abstractmethod
-    def evolve(self, gens: int, checkpoint_dir: Optional[str] = None) -> None:
+    def evolve(self, gens: int) -> None:
         """
         Evolves the population over a given number of generations.
         Must be implemented by derived classes.
