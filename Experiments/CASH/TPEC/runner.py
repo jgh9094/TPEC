@@ -3,7 +3,8 @@
 import sys
 import os
 import pandas as pd
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../..')))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../..'))
+sys.path.insert(0, REPO_ROOT)
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../Data-Preprocessing')))
 
@@ -140,7 +141,10 @@ if __name__ == "__main__":
 
     # initialize ray
     if not ray.is_initialized():
-        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True)
+        # Ray workers do not inherit this script's sys.path, so hand them the repo root via
+        # PYTHONPATH; otherwise they cannot import Source when launched outside the repo root
+        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True,
+                 runtime_env={'env_vars': {'PYTHONPATH': REPO_ROOT}})
     print(f"Ray initialized with {args.cores} cores.", flush=True)
 
     # create the CASH EA
