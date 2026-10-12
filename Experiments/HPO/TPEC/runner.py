@@ -153,12 +153,12 @@ if __name__ == "__main__":
     print(f"Outcomes shape: {y.shape}", flush=True)
     print(y.head(5), flush=True)
 
-    # if args.task == 'so':
-    #     # load spine opioid data
-    #     data_set, one_hot_cols, scalar_cols = load_spine_opioid_data(data_path=args.data_path, y_label=args.y_label)
-    #     print(f"Spine Opioid data loaded", flush=True)
-    # else:
-    #     raise ValueError(f"Unknown task '{args.task}'. Supported tasks: 'so' (spine opioid).")
+    if args.task == 'so':
+        # load spine opioid data
+        data_set, one_hot_cols, scalar_cols = load_spine_opioid_data(X, y, y_label=args.y_label)
+        print(f"Spine Opioid data loaded", flush=True)
+    else:
+        raise ValueError(f"Unknown task '{args.task}'. Supported tasks: 'so' (spine opioid).")
 
     # # load data
     # ea.load_data_pd(
