@@ -12,10 +12,7 @@ from process_data import load_modeling_data
 import argparse
 import ray
 
-def load_spine_opioid_data(data_path: str, y_label: str):
-
-    # load the dataset as a pandas dataframe
-    data_set = pd.read_csv(data_path)
+def load_spine_opioid_data(X: pd.DataFrame, y: pd.DataFrame, y_label: str):
 
     # all possible y labels in the dataset
     possible_y_labels = ['LOS_extended', 'discharge_Home', 'HOSP_READM_90']
@@ -24,10 +21,8 @@ def load_spine_opioid_data(data_path: str, y_label: str):
     if y_label not in possible_y_labels:
         raise ValueError(f"Invalid y_label '{y_label}'. Must be one of {possible_y_labels}.")
 
-    # drop all other y labels from the dataset
-    for label in possible_y_labels:
-        if label != y_label:
-            data_set = data_set.drop(columns=[label])
+    # combine features with only the selected y label
+    data_set = pd.concat([X, y[[y_label]]], axis=1)
 
     # cols needed to be one-hot encoded
     one_hot_cols = []
