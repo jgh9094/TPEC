@@ -103,7 +103,7 @@ base preprocessor must fully numericize *and* scale: `StandardScaler` on numeric
 
 ### The `evolve()` loop
 
-`evolve(gens, checkpoint_dir)` ([ea.py:226](Source/HPO/ea.py#L226)) is the whole run:
+`evolve(gens)` ([ea.py:224](Source/HPO/ea.py#L224)) is the whole run:
 
 1. **Initialize** — `initialize_population()` ([ea.py:318](Source/HPO/ea.py#L318)) creates
    `pop_size` `HPOIndividual`s from `param_space.generate_random_parameters(self.rng)`, each tagged
@@ -113,19 +113,16 @@ base preprocessor must fully numericize *and* scale: `StandardScaler` on numeric
    adds every individual to `eval_archive` and writes back `archive_id`.
 4. **Prune + track** — `_drop_errored` removes errored individuals from the breeding pool (they
    stay archived); `update_best_seen` advances `best_perf`.
-5. **Checkpoint** (optional) — `checkpoint_best_seen(generation=-1, ...)`.
-6. **Per generation** (`g` in `range(gens)`):
+5. **Per generation** (`g` in `range(gens)`):
    - `variation_order(pop_size, crossover_prob)` → per-offspring `'m'`/`'c'` operators + parent
      count.
    - `parent_selection(...)` ([ea.py:336](Source/HPO/ea.py#L336)) — tournament selection over
      validation performance, tournament size clamped to the (possibly pruned) pool.
    - `generate_offspring(...)` ([ea.py:537](Source/HPO/ea.py#L537)) — fits TPE from the archive
      (if `tpe_prob > 0`) and calls `mutate`/`crossover` per the variation order.
-   - `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen` →
-     `checkpoint_best_seen`.
-7. **Finish** — take the held best via `_select_best`, run `model_test_evaluation`, store
-   `best_result`. If checkpointing ran, the final checkpoint already evaluated it and stashed it,
-   so it's reused verbatim.
+   - `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen`.
+6. **Finish** — take the held best via `_select_best`, run `model_test_evaluation`, store
+   `best_result` (train/val/test performance plus complexity).
 
 ### `evaluation()` — dedup, dispatch, finalize
 
@@ -177,31 +174,26 @@ one entry per **unique** genome key, each rebuilt as an `HPOIndividual` whose ge
 through `param_space.tpe_parameters` and whose validation performance is **negated** (TPE
 minimizes; the EA maximizes). Errored individuals negate their penalty into the "bad" region.
 
-### Selection, checkpoints, final test
+### Selection and final test
 
-`update_best_seen` ([ea.py:666](Source/HPO/ea.py#L666)) scans the whole batch and advances the
+`update_best_seen` ([ea.py:649](Source/HPO/ea.py#L649)) scans the whole batch and advances the
 scalar `best_perf`. Only when the batch **strictly** improves it does it re-draw the held
 `best_entry` via `eval_archive.best(self.rng)` (top validation score, then earliest generation, then
 random tie-break); later individuals that merely tie the best never replace it.
 
-`_select_best` ([ea.py:697](Source/HPO/ea.py#L697)) makes no draw: it rebuilds the held
-`best_entry` with its validation performance set. Because the only `rng` draw happens in
-`update_best_seen`, checkpointing does not shift the search trajectory.
+`_select_best` ([ea.py:702](Source/HPO/ea.py#L702)) makes no draw: it rebuilds the held
+`best_entry` with its validation performance set. The only `rng` draw happens in
+`update_best_seen`.
 
-`checkpoint_best_seen` ([ea.py:716](Source/HPO/ea.py#L716)) — if `checkpoint_dir` is set, after
-each generation it takes the best via the **same** `_select_best`, evaluates it on the test set
-(skipping the refit when the held genome is unchanged from the last checkpoint), appends a row to
-`checkpoints.csv`, writes a `results_eval_N.json` snapshot (N = candidates considered =
-`len(eval_archive)`), and stashes the selection in `best_result` so the final result matches the last
-checkpoint exactly.
-
-`model_test_evaluation` ([ea.py:990](Source/HPO/ea.py#L990)) fits the base preprocessor on the full
+`model_test_evaluation` ([ea.py:919](Source/HPO/ea.py#L919)) fits the base preprocessor on the full
 training split, builds the estimator via `_build_classifier`/`_build_regressor` (each re-derives
 kwargs through `eval_parameters(..., random_state=self.seed)`), fits on the full training set, and
-scores train + held-out test (ROC-AUC or R²).
+scores train + held-out test (ROC-AUC or R²). It also returns the fitted estimator's
+`calculate_model_complexity` score ([Source/ML/complexity.py](Source/ML/complexity.py)); the fixed
+base preprocessor is not counted.
 
-`save_results` ([ea.py:1111](Source/HPO/ea.py#L1111)) writes `best_results.json` and calls
-`save_archive` to dump `eval_archive.to_records()` as `archive.json`.
+`save_results` ([ea.py:1041](Source/HPO/ea.py#L1041)) writes `best_results.json` (including
+`complexity`) and calls `save_archive` to dump `eval_archive.to_records()` as `archive.json`.
 
 ---
 

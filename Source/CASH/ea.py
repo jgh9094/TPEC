@@ -68,6 +68,7 @@ from Source.ML.transformer import TRANSFORMERS
 from Source.ML.selector import SELECTORS
 from Source.ML.classifiers import CLASSIFIERS
 from Source.ML.regressor import REGRESSORS
+from Source.ML.complexity import calculate_model_complexity
 
 # Component available at a node when its step is skipped. Represented as a literal string
 # with an empty parameter space (matches the Source/ML registries' convention).
@@ -458,16 +459,9 @@ class EA(BaseEA):
         # archive entry currently held as the best-so-far; re-drawn (with the archive's tie-break)
         # only when a generation strictly improves ``best_perf``, so ties found later never replace it
         self.best_entry: Optional[ArchiveEntry] = None
-        # final selected result (architecture + genotype + train/val/test), populated at the end of
-        # evolve() from the held ``best_entry`` and consumed by save_results()
+        # final selected result (architecture + genotype + train/val/test + complexity), populated
+        # at the end of evolve() from the held ``best_entry`` and consumed by save_results()
         self.best_result: Optional[Dict[str, Any]] = None
-
-        # per-generation diagnostic checkpoints (test performance of the best-so-far individual),
-        # recorded across generations so a checkpoint can stand in for a shorter run
-        self.checkpoints: List[dict] = []
-        # genome key of the most recent checkpoint's selected best, so a full-model test refit is
-        # skipped when the held best is genome-identical to the previous checkpoint's
-        self._last_ckpt_key: Optional[str] = None
 
         return
 
@@ -723,8 +717,6 @@ class EA(BaseEA):
 
         Args:
             gens (int): Number of generations to evolve.
-            checkpoint_dir (Optional[str]): If provided, the best-so-far individual's test
-                performance is recorded after every generation (diagnostic only).
         """
         assert gens > 0, "Number of generations must be a positive integer."
         assert self.operators is not None, "Data must be loaded before evolving."
@@ -773,22 +765,20 @@ class EA(BaseEA):
         print(f"Best validation performance found: {self.best_perf}", flush=True)
 
         # The returned pipeline is the held best entry (``_select_best``), fixed whenever the best
-        # score last strictly improved. When checkpointing ran, the final checkpoint already evaluated
-        # it and stashed it in ``self.best_result``; reuse it so the saved result matches the last
-        # checkpoint exactly. Otherwise (no checkpointing) evaluate it once here.
-        if self.best_result is None:
-            best_individual, best_val = self._select_best()
-            train_score, test_score = self.model_test_evaluation(best_individual)
-            self.best_result = {
-                "architecture": best_individual.get_architecture(),
-                "genotype": best_individual.get_genotype(),
-                "train_performance": train_score,
-                "val_performance": best_val,
-                "test_performance": test_score,
-            }
+        # score last strictly improved. Fit it on the full training set and score it on the test set.
+        best_individual, best_val = self._select_best()
+        train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+        self.best_result = {
+            "architecture": best_individual.get_architecture(),
+            "genotype": best_individual.get_genotype(),
+            "train_performance": train_score,
+            "val_performance": best_val,
+            "test_performance": test_score,
+            "complexity": complexity,
+        }
 
-        print(f"Final test evaluation - Train: {self.best_result['train_performance']}, "
-              f"Val: {self.best_perf}, Test: {self.best_result['test_performance']}", flush=True)
+        print(f"Final test evaluation - Train: {train_score}, Val: {self.best_perf}, "
+              f"Test: {test_score}, Complexity: {complexity}", flush=True)
 
         return
 
@@ -1092,10 +1082,7 @@ class EA(BaseEA):
         performance set) alongside its validation score.
 
         No draw happens here: the tie-break is made once, in ``update_best_seen``, when the best
-        score strictly improves. Both the per-generation checkpoint and the final evaluation select
-        through here, so a checkpoint recorded at a given evaluation budget holds exactly what a full
-        run stopping at that budget would return, and enabling checkpointing does not consume
-        ``self.rng`` or shift the search trajectory.
+        score strictly improves, so selecting the final result does not consume ``self.rng``.
         """
         assert self.eval_archive is not None, "No archive to select the best individual from."
         assert self.best_entry is not None and self.best_entry.val_performance is not None, \
@@ -1343,7 +1330,7 @@ class EA(BaseEA):
             # else: duplicate of a pending genome in this same batch -> filled in post-evaluation
         return pending
 
-    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float]:
+    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float, int]:
         """
         Fit an individual's pipeline on the full training set and evaluate on the held-out test
         set, returning (train_score, test_score).
@@ -1363,7 +1350,8 @@ class EA(BaseEA):
             individual (Individual): The individual to evaluate.
 
         Returns:
-            Tuple[float, float]: (train_score, test_score).
+            Tuple[float, float, int]: (train_score, test_score, complexity). Complexity scores the
+            evolved Pipeline only; the fixed base preprocessor is not part of the search.
         """
         assert self.X_train is not None and self.X_test is not None, "Data must be loaded before evaluation."
         assert self.y_train is not None and self.y_test is not None, "Data must be loaded before evaluation."
@@ -1380,12 +1368,13 @@ class EA(BaseEA):
         steps = assemble_steps(pipeline_steps, self.scale_cols, classification=self.classification)
         model = Pipeline(steps)
         model.fit(X_train_preprocessed, self.y_train)
+        complexity = calculate_model_complexity(model)
 
         # regression pipelines are scored by R^2 (predict); classification by ROC-AUC (predict_proba)
         if not self.classification:
             train_score = float(r2_score(self.y_train, model.predict(X_train_preprocessed)))
             test_score = float(r2_score(self.y_test, model.predict(X_test_preprocessed)))
-            return train_score, test_score
+            return train_score, test_score, complexity
 
         assert self.binary_classification is not None, "Data must be loaded before evaluation."
         train_pred_proba = model.predict_proba(X_train_preprocessed)
@@ -1398,7 +1387,7 @@ class EA(BaseEA):
             train_score = float(roc_auc_score(self.y_train, train_pred_proba, multi_class='ovo', labels=self.labels))
             test_score = float(roc_auc_score(self.y_test, test_pred_proba, multi_class='ovo', labels=self.labels))
 
-        return train_score, test_score
+        return train_score, test_score, complexity
 
     # ------------------------------------------------------------------ results
 
@@ -1420,6 +1409,7 @@ class EA(BaseEA):
             "train_accuracy": self.best_result["train_performance"],
             "validation_accuracy": float(self.best_perf),
             "test_accuracy": self.best_result["test_performance"],
+            "complexity": self.best_result["complexity"],
             "best_pipeline": self.best_result["genotype"],
         }
 

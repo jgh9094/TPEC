@@ -336,7 +336,7 @@ class BaseEA(ABC):
         pass
 
     @abstractmethod
-    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float]:
+    def model_test_evaluation(self, individual: Individual) -> Tuple[float, float, int]:
         """
         Fits an individual's model on the full training set and evaluates it on the held-out
         test set. Must be implemented by derived classes, since the way an individual maps to a
@@ -346,7 +346,8 @@ class BaseEA(ABC):
             individual (Individual): The individual to evaluate.
 
         Returns:
-            Tuple[float, float]: A tuple containing (train_score, test_score).
+            Tuple[float, float, int]: (train_score, test_score, complexity), where complexity is
+            the fitted model's ``calculate_model_complexity`` score (Source/ML/complexity.py).
         """
         pass
 
@@ -358,7 +359,6 @@ class BaseEA(ABC):
 
         Args:
             gens (int): Number of generations to evolve.
-            checkpoint_dir (Optional[str]): Directory to save checkpoints. If None, no checkpoints are saved.
         """
         pass
 

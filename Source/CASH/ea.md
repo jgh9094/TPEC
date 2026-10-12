@@ -130,18 +130,17 @@ Numerics are listed first so the scaler can target them by index.
 
 ### The `evolve()` loop
 
-`evolve(gens, checkpoint_dir)` ([ea.py:712](Source/CASH/ea.py#L712)) mirrors HPO's loop:
+`evolve(gens)` ([ea.py:709](Source/CASH/ea.py#L709)) mirrors HPO's loop:
 
 1. `initialize_population()` ([ea.py:791](Source/CASH/ea.py#L791)) — `pop_size` random pipelines
    via `_random_candidate` (one random component + sampled params per node), tagged
    `construction = "random"`.
-2. `evaluation(...)` → `record_history(generation=-1)` → `_drop_errored` → `update_best_seen` →
-   `checkpoint_best_seen(generation=-1)`.
+2. `evaluation(...)` → `record_history(generation=-1)` → `_drop_errored` → `update_best_seen`.
 3. Per generation `g`: `variation_order` → `parent_selection` (tournament over validation) →
    `generate_offspring` → `evaluation` → `record_history(generation=g)` → `_drop_errored` →
-   `update_best_seen` → `checkpoint_best_seen`.
-4. Finish: `_select_best` → `model_test_evaluation` → `best_result` (reused from the last
-   checkpoint if checkpointing ran).
+   `update_best_seen`.
+4. Finish: `_select_best` → `model_test_evaluation` → `best_result` (train/val/test performance
+   plus complexity).
 
 ### `evaluation()` — dedup, dispatch, finalize
 
@@ -195,17 +194,19 @@ The candidate factories are what make CASH's variation structural + parametric:
 one `CASHIndividual` per unique genome key, each with **negated** validation performance (TPE
 minimizes; the EA maximizes). Errored pipelines negate into the "bad" group.
 
-### Selection, checkpoints, final test
+### Selection and final test
 
-`update_best_seen` ([ea.py:1035](Source/CASH/ea.py#L1035)), `_select_best`
-([ea.py:1066](Source/CASH/ea.py#L1066)), `checkpoint_best_seen`
-([ea.py:1085](Source/CASH/ea.py#L1085)), and `model_test_evaluation`
-([ea.py:1403](Source/CASH/ea.py#L1403)) parallel HPO but operate on pipelines: the final test refit
+`update_best_seen` ([ea.py:1026](Source/CASH/ea.py#L1026)), `_select_best`
+([ea.py:1079](Source/CASH/ea.py#L1079)), and `model_test_evaluation`
+([ea.py:1333](Source/CASH/ea.py#L1333)) parallel HPO but operate on pipelines: the final test refit
 fits the base preprocessor on the full train split, assembles the winning pipeline via
 `_resolve_pipeline_steps` + `assemble_steps` (same steps as CV, passthrough omitted, scaler
-numeric-aware), fits, and scores train + test. Checkpoints and `best_results.json` additionally
-record the winning `architecture` (via `get_architecture()`). `save_results`
-([ea.py:1452](Source/CASH/ea.py#L1452)) writes `best_results.json` and `archive.json`.
+numeric-aware), fits, and scores train + test. It also returns the fitted Pipeline's
+`calculate_model_complexity` score ([Source/ML/complexity.py](Source/ML/complexity.py)): the
+predictor's parameter count, plus 1 per transformer/scaler step and 0 per selector; the fixed base
+preprocessor is not counted. `best_results.json` additionally records the winning `architecture`
+(via `get_architecture()`) and `complexity`. `save_results` ([ea.py:1394](Source/CASH/ea.py#L1394))
+writes `best_results.json` and `archive.json`.
 
 ---
 
