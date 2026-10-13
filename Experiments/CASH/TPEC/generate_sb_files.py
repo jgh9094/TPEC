@@ -40,6 +40,8 @@ BUDGET_CONFIGS = {
     "100_Evals": (100, "1h"),
     "200_Evals": (200, "2h"),
     "300_Evals": (300, "3h"),
+    "400_Evals": (400, "4h"),
+    "500_Evals": (500, "5h"),
 }
 
 # strategy directory -> (TPE_PROB, short code for the job name)
@@ -63,7 +65,7 @@ TEMPLATE = """\
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=05:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mem=200G
 #SBATCH --job-name={job_name}
 #SBATCH -p defq,moore,preemptable

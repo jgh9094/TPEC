@@ -2,12 +2,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=05:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mem=200G
 #SBATCH --job-name=1h_t25_cash
 #SBATCH -p defq,moore,preemptable
-# Rerun of missing seed: discharge_Home Seed_7 (index 1*21 + 7 + 1 = 29). Restore to 1-63 afterwards.
-#SBATCH --array=29
+#SBATCH --array=1-63
 
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
