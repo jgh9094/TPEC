@@ -26,6 +26,12 @@ def print_csv_summary(csv_path: Path) -> None:
             null_count = data[column].isnull().sum()
             print(f"  - {column}: {null_count} null values")
 
+    # drop any columns that have null values from null_columns
+    data = data.drop(columns=null_columns)
+
+    # print new dimensions after dropping columns with null values
+    print(f"New dimensions after dropping columns with null values: {data.shape[0]} rows x {data.shape[1]} columns")
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Print the dimensions and column headers of a CSV file."
