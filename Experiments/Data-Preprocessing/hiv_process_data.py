@@ -32,6 +32,12 @@ def print_csv_summary(csv_path: Path) -> None:
     low_unique_columns = [col for col in data.columns if data[col].nunique() <= 2]
     print(f"Columns with less than two unique values: {len(low_unique_columns)}")
 
+    # go through and find the more than two unique values columns and print the first 5 unique values for each
+    more_unique_columns = [col for col in data.columns if data[col].nunique() > 2]
+    print(f"Columns with more than two unique values: {len(more_unique_columns)}")
+    for col in more_unique_columns:
+        print(f"Column: {col}, Unique values: {data[col].unique()[:5]}")
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Print the dimensions and column headers of a CSV file."
