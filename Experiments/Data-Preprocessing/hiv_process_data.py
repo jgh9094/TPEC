@@ -17,8 +17,14 @@ def print_csv_summary(csv_path: Path) -> None:
 
     print(f"CSV file: {csv_path}")
     print(f"Dimensions: {data.shape[0]} rows x {data.shape[1]} columns")
-    print(f"Headers: {data.columns.tolist()}")
 
+    # go through the column headers and find how many have null values
+    null_columns = data.columns[data.isnull().any()].tolist()
+    if null_columns:
+        print(f"Columns with null values: {len(null_columns)}")
+        for column in null_columns:
+            null_count = data[column].isnull().sum()
+            print(f"  - {column}: {null_count} null values")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
