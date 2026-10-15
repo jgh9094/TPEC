@@ -28,8 +28,8 @@ def print_csv_summary(csv_path: Path) -> None:
     # print new dimensions after dropping columns with null values
     print(f"New dimensions after dropping columns with null values: {data.shape[0]} rows x {data.shape[1]} columns")
 
-    # go through columns and find how many have only less than two unique values
-    low_unique_columns = [col for col in data.columns if data[col].nunique() < 2]
+    # go through columns and find how many have only leq than two unique values
+    low_unique_columns = [col for col in data.columns if data[col].nunique() <= 2]
     print(f"Columns with less than two unique values: {len(low_unique_columns)}")
 
 def parse_args() -> argparse.Namespace:
