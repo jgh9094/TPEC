@@ -31,6 +31,7 @@ def print_csv_summary(csv_path: Path) -> None:
     # go through columns and find how many have only leq than two unique values
     low_unique_columns = [col for col in data.columns if data[col].nunique() <= 2]
     print(f"Columns with less than two unique values: {len(low_unique_columns)}")
+    print(f"Columns with less than two unique values: \\n {low_unique_columns}")
 
     # go through and find the more than two unique values columns and print the first 5 unique values for each
     more_unique_columns = [col for col in data.columns if data[col].nunique() > 2]
