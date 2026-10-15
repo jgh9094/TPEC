@@ -11,7 +11,7 @@ The sweep varies two dimensions, each encoded by a directory level under
   * Search strategy   -> EA, TPE25, TPE50, TPE100
 
 There is no model dimension: CASH evolves the whole pipeline, including the estimator. That is
-3 x 4 = 12 files, each a 63-task array (3 tasks x 21 seeds).
+3 x 4 = 12 files, each a 21-task array (one array task per seed of the single target).
 
 The budget counts candidates considered: the EA's initial population plus one offspring population
 per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 25, GENS is derived per budget:
@@ -34,6 +34,12 @@ TPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 # --- factorial dimensions ------------------------------------------------------------
 
 POP_SIZE = 25
+
+# the single target (y_label) used for every run in this sweep
+TASK_ID = "HIV_DETECTABLE"
+
+# replicates: seeds 0 .. N_SEEDS - 1, one array task per seed
+N_SEEDS = 21
 
 # budget directory -> total candidates considered
 BUDGET_CONFIGS = {
@@ -67,7 +73,7 @@ TEMPLATE = """\
 #SBATCH --mem=200G
 #SBATCH --job-name={job_name}
 #SBATCH -p defq,moore,preemptable
-#SBATCH --array=1-63
+#SBATCH --array=1-{n_seeds}
 
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
@@ -87,15 +93,11 @@ NUM_OFFSPRING=20
 GAMMA=0.3
 DATA_DIRECTORY={data_directory}
 # variables that are set by the SLURM job array
-# Array of all task IDs from tasks_summary.csv (3 tasks x 21 replicates = 63 jobs)
-TASK_IDS=(LOS_extended discharge_Home HOSP_READM_90)
+# Each array task is one seed of the single target ({n_seeds} jobs total)
+TASK_ID={task_id}
 
-# Calculate which task and seed based on SLURM_ARRAY_TASK_ID (1-63)
-# Each task gets 21 replicates (seeds 0-20)
-TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 21 ))
-SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
-# specific task id for the OpenML dataset to be used in this experiment
-TASK_ID=${{TASK_IDS[$TASK_INDEX]}}
+# SLURM_ARRAY_TASK_ID runs 1-{n_seeds}, one seed per array task (seeds 0-{max_seed})
+SEED=$(( SLURM_ARRAY_TASK_ID - 1 ))
 # Output directory for this specific task and seed
 OUTPUT_DIRECTORY={results_root}/{budget_dir}/{strat_dir}/Task_${{TASK_ID}}/Seed_${{SEED}}/
 
@@ -132,6 +134,9 @@ def main() -> None:
                 gens=gens,
                 pop_size=POP_SIZE,
                 tpe_prob=tpe_prob,
+                task_id=TASK_ID,
+                n_seeds=N_SEEDS,
+                max_seed=N_SEEDS - 1,
                 data_directory=DATA_DIRECTORY,
                 results_root=RESULTS_ROOT,
                 budget_dir=budget_dir,
