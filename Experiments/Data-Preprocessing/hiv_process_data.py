@@ -20,17 +20,17 @@ def print_csv_summary(csv_path: Path) -> None:
 
     # go through the column headers and find how many have null values
     null_columns = data.columns[data.isnull().any()].tolist()
-    if null_columns:
-        print(f"Columns with null values: {len(null_columns)}")
-        for column in null_columns:
-            null_count = data[column].isnull().sum()
-            print(f"  - {column}: {null_count} null values")
+    print(f"Columns with null values: {len(null_columns)}")
 
     # drop any columns that have null values from null_columns
     data = data.drop(columns=null_columns)
 
     # print new dimensions after dropping columns with null values
     print(f"New dimensions after dropping columns with null values: {data.shape[0]} rows x {data.shape[1]} columns")
+
+    # go through columns and find how many have only less than two unique values
+    low_unique_columns = [col for col in data.columns if data[col].nunique() < 2]
+    print(f"Columns with less than two unique values: {len(low_unique_columns)}")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
