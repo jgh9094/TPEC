@@ -36,7 +36,7 @@ TPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 POP_SIZE = 25
 
 # the single target (y_label) used for every run in this sweep
-TASK_ID = "HIV_DETECTABLE"
+TASK_ID = "virologic_failure"
 
 # replicates: seeds 0 .. N_SEEDS - 1, one array task per seed
 N_SEEDS = 21

@@ -27,7 +27,7 @@ GAMMA=0.3
 DATA_DIRECTORY=/home/hernandezj45/Repos/TPEC/Data/HIV/ecoxai_dataset_5pct_no_PHI.csv
 # variables that are set by the SLURM job array
 # Each array task is one seed of the single target (21 jobs total)
-TASK_ID=HIV_DETECTABLE
+TASK_ID=virologic_failure
 
 # SLURM_ARRAY_TASK_ID runs 1-21, one seed per array task (seeds 0-20)
 SEED=$(( SLURM_ARRAY_TASK_ID - 1 ))
