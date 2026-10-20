@@ -61,7 +61,7 @@ STRATEGY_CONFIGS = {
 
 # --- constants shared by every file ---------------------------------------------------
 DATA_DIRECTORY = "/home/hernandezj45/Repos/TPEC/Data/HIV/ecoxai_dataset_5pct_no_PHI.csv"
-RUNNER = "/home/hernandezj45/Repos/TPEC/Experiments/HIV_CASH/TPEC-5pct-50M-50C/runner.py"
+RUNNER = "/home/hernandezj45/Repos/TPEC/Experiments/HIV_CASH/runner.py"
 RESULTS_ROOT = "/home/hernandezj45/Repos/TPEC/Results_HIV_5pct/CASH/TPEC-50M-50C"
 
 TEMPLATE = """\
