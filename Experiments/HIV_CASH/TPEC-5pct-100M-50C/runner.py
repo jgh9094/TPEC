@@ -145,7 +145,7 @@ if __name__ == "__main__":
     if not ray.is_initialized():
         # Ray workers do not inherit this script's sys.path, so hand them the repo root via
         # PYTHONPATH; otherwise they cannot import Source when launched outside the repo root
-        ray.init(num_cpus=args.cores, include_dashboard=True, ignore_reinit_error=True,
+        ray.init(num_cpus=args.cores, include_dashboard=False, ignore_reinit_error=True,
                  runtime_env={'env_vars': {'PYTHONPATH': REPO_ROOT}})
     print(f"Ray initialized with {args.cores} cores.", flush=True)
 
