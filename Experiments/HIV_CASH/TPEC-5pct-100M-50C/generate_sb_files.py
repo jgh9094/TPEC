@@ -79,7 +79,7 @@ source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpe-ea
 
 # standard parameters used for all experiments
-TRAIN_P=0.70
+TRAIN_P=0.80
 GENS={gens}
 POP_SIZE={pop_size}
 CORES=$SLURM_CPUS_PER_TASK
