@@ -8,8 +8,8 @@
 # Each of the four nodes is an evolved decision (which component, plus its hyperparameters).
 # EA executes the following workflow:
 # - tournament selection
-# - per-offspring mutation/crossover with/out TPE-guided variation
-# - TPE-guided candidate ranking against an evaluated archive.
+# - per-offspring random mutation/crossover
+# - TPE-guided selection of the best candidate offspring against an evaluated archive.
 #
 # Things to note:
 #   * the genotype is a nested pipeline candidate (see Source/CASH/individual.py)
@@ -344,7 +344,8 @@ def cv_pipeline_regression(
 @typechecked
 class EA(BaseEA):
     """
-    CASH EA: evolves full scikit-learn pipelines with TPE-guided variation.
+    CASH EA: evolves full scikit-learn pipelines with random variation and TPE-guided selection
+    of the best candidate offspring.
     Extends BaseEA with pipeline-aware (structural + parametric) mutation and crossover.
     """
 
@@ -373,8 +374,8 @@ class EA(BaseEA):
             pop_size (int): Population size for the evolutionary algorithm.
             cores (int): Number of CPU cores to use for parallel evaluation.
             mut_prob (float): Per-parameter (gene-level) mutation probability.
-            mut_var (float): Variance of the small local shift-mutation applied to TPE-guided
-                offspring (non-TPE offspring instead resample parameters uniformly).
+            mut_var (float): Accepted for interface compatibility; unused (mutations resample
+                parameters uniformly).
             tpe_prob (float): Probability an offspring is produced via TPE-guided variation.
             tournament_size (int): Tournament size for parent selection.
             num_offspring (int): Number of pseudo-offspring generated per TPE-guided step
@@ -585,19 +586,16 @@ class EA(BaseEA):
         """Build a full random pipeline candidate (one component + params per node)."""
         return {node: self._random_node_entry(node, rng) for node in self.node_names}
 
-    def _mutate_genotype(self, genotype: Candidate, use_tpe: bool) -> Candidate:
+    def _mutate_genotype(self, genotype: Candidate) -> Candidate:
         """
-        Produce a new pipeline candidate by mutating ``genotype``.
+        Produce a new pipeline candidate by randomly mutating ``genotype``.
 
         Each node is mutated independently. With probability ``component_mut_prob`` the node
         undergoes STRUCTURAL mutation -- its component is resampled and fresh parameters drawn
         (a passthrough choice is possible where allowed). Otherwise the component is kept and its
-        parameters are mutated PARAMETRICALLY, in a way that matches the offspring's exploration
-        mode: a TPE offspring takes a small local Gaussian shift (variance ``self.mut_var``, per-gene
-        rate ``self.mut_prob``) so it explores near the parent, while a non-TPE offspring resamples
-        each gene uniformly from its full range (``mutate_parameters_random``) so it jumps around
-        unbiased. A parameter-free component (passthrough or default-only operator) simply keeps its
-        empty parameter dict.
+        parameters are mutated PARAMETRICALLY: each gene is resampled uniformly from its full range
+        (``mutate_parameters_random``, per-gene rate ``self.mut_prob``). A parameter-free component
+        (passthrough or default-only operator) simply keeps its empty parameter dict.
         """
         child: Candidate = {}
         for node in self.node_names:
@@ -611,19 +609,16 @@ class EA(BaseEA):
                 ops = self.operators[node][name]
                 if ops is None:
                     params: dict = {}
-                elif use_tpe:
-                    params = ops.mutate_parameters_shift(cp.deepcopy(entry["params"]), self.mut_var, self.mut_prob, self.rng)
                 else:
                     params = ops.mutate_parameters_random(cp.deepcopy(entry["params"]), self.mut_prob, self.rng)
                 child[node] = {"name": name, "params": params}
         return child
 
-    def _crossover_child(self, parent_a: Individual, parent_b: Individual, use_tpe: bool) -> Tuple[Candidate, str]:
+    def _crossover_child(self, parent_a: Individual, parent_b: Individual) -> Tuple[Candidate, str]:
         """
         Produce a single recombined child genotype: uniform (per-node) crossover of the two
-        parents, then (with probability ``self.mut_prob``) a mutation (structural + parametric via
-        ``_mutate_genotype``) matching the exploration mode -- a small local shift on the TPE path,
-        an unbiased random resample otherwise.
+        parents, then (with probability ``self.mut_prob``) a random mutation (structural + parametric
+        via ``_mutate_genotype``).
 
         Also reports the variation operator for THIS candidate: ``CROSSOVER_MUTATION_OPERATION`` if
         the mutation gate fired, else ``CROSSOVER_OPERATION``. This is per-candidate because a TPE
@@ -633,7 +628,6 @@ class EA(BaseEA):
         Args:
             parent_a (Individual): The first parent.
             parent_b (Individual): The second parent.
-            use_tpe (bool): Which mutation mode to apply if the child is mutated.
 
         Returns:
             Tuple[Candidate, str]: The recombined child's pipeline genotype and its variation operator.
@@ -642,7 +636,7 @@ class EA(BaseEA):
 
         # offspring-level mutation gate: with probability mut_prob, mutate the crossover child
         if self.rng.random() < self.mut_prob:
-            child = self._mutate_genotype(child, use_tpe)
+            child = self._mutate_genotype(child)
             return child, CROSSOVER_MUTATION_OPERATION
         return child, CROSSOVER_OPERATION
 
@@ -682,8 +676,8 @@ class EA(BaseEA):
         fired) is reported alongside the winning genotype.
 
         Args:
-            tpe_candidate (Callable[[], Tuple[Candidate, str]]): Factory for a TPE-mode candidate
-                ``(genotype, operation)`` (called ``self.num_offspring`` times on a TPE roll).
+            tpe_candidate (Callable[[], Tuple[Candidate, str]]): Factory for a random candidate
+                ``(genotype, operation)`` that TPE ranks (called ``self.num_offspring`` times on a TPE roll).
             explore_candidate (Callable[[], Tuple[Candidate, str]]): Factory for a single
                 unbiased-exploration candidate ``(genotype, operation)`` (called once otherwise).
 
@@ -883,16 +877,13 @@ class EA(BaseEA):
 
     def mutate(self, parent: Individual) -> CASHIndividual:
         """
-        Produce one offspring from a single parent, owning the full TPE decision.
+        Produce one offspring from a single parent by random mutation.
 
-        Rolls for TPE-guided variation (probability ``self.tpe_prob``, gated on a successful TPE
-        fit):
-          - non-TPE: a single offspring whose parametric genes are resampled uniformly at random
-            (``mutate_parameters_random``), so it jumps around the space unbiased.
-          - TPE: generate ``self.num_offspring`` candidates whose parametric genes take a small
-            local shift (variance ``self.mut_var``) and keep the one the TPE surrogate ranks best.
-        In both modes each node independently undergoes structural mutation with probability
-        ``component_mut_prob`` (its component is resampled and fresh parameters drawn).
+        Rolls for TPE-guided selection (probability ``self.tpe_prob``, gated on a successful TPE
+        fit): generate ``self.num_offspring`` random candidates and keep the one the TPE surrogate
+        ranks best; otherwise a single random candidate is used. Each candidate's parametric genes
+        are resampled uniformly at random (``mutate_parameters_random``), and each node independently
+        undergoes structural mutation with probability ``component_mut_prob``.
 
         Args:
             parent (Individual): The parent whose pipeline is mutated.
@@ -901,24 +892,20 @@ class EA(BaseEA):
             CASHIndividual: A new offspring pipeline individual.
         """
         child, operation, construction, ei = self._tpe_or_explore(
-            tpe_candidate=lambda: (self._mutate_genotype(parent.get_genotype(), use_tpe=True), MUTATION_OPERATION),
-            explore_candidate=lambda: (self._mutate_genotype(parent.get_genotype(), use_tpe=False), MUTATION_OPERATION),
+            tpe_candidate=lambda: (self._mutate_genotype(parent.get_genotype()), MUTATION_OPERATION),
+            explore_candidate=lambda: (self._mutate_genotype(parent.get_genotype()), MUTATION_OPERATION),
         )
         # a mutation-only offspring has a single parent, so both parent slots reference it
         return self._build_offspring(child, construction, ei, operation, (parent, parent))
 
     def crossover(self, parent_a: Individual, parent_b: Individual) -> CASHIndividual:
         """
-        Produce one offspring from two parents, owning the full TPE decision.
+        Produce one offspring from two parents by crossover.
 
-        Rolls for TPE-guided variation (probability ``self.tpe_prob``, gated on a successful TPE
-        fit):
-          - non-TPE: recombine the parents (uniform per-node crossover) and, with probability
-            ``self.mut_prob``, apply an unbiased random mutation to the child; keep that single
-            candidate.
-          - TPE: generate ``self.num_offspring`` recombined candidates, each of which (with
-            probability ``self.mut_prob``) receives a small local shift-mutation, then keep the one
-            the TPE surrogate ranks best.
+        Rolls for TPE-guided selection (probability ``self.tpe_prob``, gated on a successful TPE
+        fit): generate ``self.num_offspring`` recombined candidates, each of which (with probability
+        ``self.mut_prob``) receives a random mutation, and keep the one the TPE surrogate ranks best.
+        Otherwise a single recombined candidate is kept.
 
         Nodes are recombined as a unit (component + params kept together) so the child never pairs
         one component's name with another's parameters.
@@ -931,8 +918,8 @@ class EA(BaseEA):
             CASHIndividual: A new offspring pipeline individual.
         """
         child, operation, construction, ei = self._tpe_or_explore(
-            tpe_candidate=lambda: self._crossover_child(parent_a, parent_b, use_tpe=True),
-            explore_candidate=lambda: self._crossover_child(parent_a, parent_b, use_tpe=False),
+            tpe_candidate=lambda: self._crossover_child(parent_a, parent_b),
+            explore_candidate=lambda: self._crossover_child(parent_a, parent_b),
         )
         return self._build_offspring(child, construction, ei, operation, (parent_a, parent_b))
 
@@ -1411,7 +1398,6 @@ class EA(BaseEA):
         os.makedirs(save_dir, exist_ok=True)
 
         best_results = {
-            "task_id": self.task_id,
             "seed": self.seed,
             "architecture": self.best_result["architecture"],
             "train_performance": self.best_result["train_performance"],
