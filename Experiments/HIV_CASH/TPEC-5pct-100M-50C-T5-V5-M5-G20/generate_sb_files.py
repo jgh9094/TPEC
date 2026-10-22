@@ -48,8 +48,8 @@ BUDGET_CONFIGS = {
 
 # strategy directory -> (TPE_PROB, short code for the job name)
 #   EA    : no TPE -- every offspring resamples its parameters uniformly (unbiased exploration)
-#   TPExx : TPE-guided with probability xx%; TPE offspring take a small local shift (mut_var),
-#           non-TPE offspring resample uniformly at random
+#   TPExx : TPE-guided with probability xx%; TPE picks the best of several random candidates,
+#           otherwise a single random candidate is used
 STRATEGY_CONFIGS = {
     "EA": ("0.0", "ea"),
     "TPE25": ("0.25", "t25"),
@@ -82,7 +82,6 @@ GENS={gens}
 POP_SIZE={pop_size}
 CORES=$SLURM_CPUS_PER_TASK
 MUT_PROB=0.5
-MUT_VAR=0.5
 CROSSOVER_PROB=0.5
 COMPONENT_MUT_PROB=0.5
 TPE_PROB={tpe_prob}
@@ -109,7 +108,6 @@ python {runner} \\
     --pop_size $POP_SIZE \\
     --cores $CORES \\
     --mut_prob $MUT_PROB \\
-    --mut_var $MUT_VAR \\
     --crossover_prob $CROSSOVER_PROB \\
     --component_mut_prob $COMPONENT_MUT_PROB \\
     --tpe_prob $TPE_PROB \\

@@ -7,7 +7,7 @@ The sweep varies two dimensions, each encoded by a directory level under
 
     <budget>_Evals / <strategy> / cash.sb
 
-  * Evaluation budget -> 250_Evals / 500_Evals
+  * Evaluation budget -> 200_Evals / 300_Evals
   * Search strategy   -> EA, TPE25, TPE50, TPE100
 
 There is no model dimension: CASH evolves the whole pipeline, including the estimator. That is
@@ -16,8 +16,8 @@ There is no model dimension: CASH evolves the whole pipeline, including the esti
 The budget counts candidates considered: the EA's initial population plus one offspring population
 per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 25, GENS is derived per budget:
 
-    250_Evals  -> GENS = 9    (25 * 10 = 250)
-    500_Evals  -> GENS = 19   (25 * 20 = 500)
+    200_Evals  -> GENS = 7    (25 * 8  = 200)
+    300_Evals  -> GENS = 11   (25 * 12 = 300)
 
 The data, tasks, seeds, train proportion and EA settings match the HPO TPEC sweep
 (Experiments/HPO/TPEC/generate_sb_files.py); COMPONENT_MUT_PROB is CASH-only.
@@ -42,14 +42,14 @@ N_SEEDS = 21
 
 # budget directory -> total candidates considered
 BUDGET_CONFIGS = {
-    "250_Evals": 250,
-    "500_Evals": 500,
+    "200_Evals": 200,
+    "300_Evals": 300,
 }
 
 # strategy directory -> (TPE_PROB, short code for the job name)
 #   EA    : no TPE -- every offspring resamples its parameters uniformly (unbiased exploration)
-#   TPExx : TPE-guided with probability xx%; TPE offspring take a small local shift (mut_var),
-#           non-TPE offspring resample uniformly at random
+#   TPExx : TPE-guided with probability xx%; TPE picks the best of several random candidates,
+#           otherwise a single random candidate is used
 STRATEGY_CONFIGS = {
     "EA": ("0.0", "ea"),
     "TPE25": ("0.25", "t25"),
@@ -60,7 +60,7 @@ STRATEGY_CONFIGS = {
 # --- constants shared by every file ---------------------------------------------------
 DATA_DIRECTORY = "/home/hernandezj45/Repos/TPEC/Data/HIV/ecoxai_dataset_5pct_no_PHI.csv"
 RUNNER = "/home/hernandezj45/Repos/TPEC/Experiments/HIV_CASH/runner.py"
-RESULTS_ROOT = "/home/hernandezj45/Repos/TPEC/Results_HIV_5pct_T2_V5_M5_G2/CASH"
+RESULTS_ROOT = "/home/hernandezj45/Repos/TPEC/Results_HIV_5pct_T2_V5_M5_G25/CASH"
 
 TEMPLATE = """\
 #!/bin/bash -l
@@ -82,13 +82,12 @@ GENS={gens}
 POP_SIZE={pop_size}
 CORES=$SLURM_CPUS_PER_TASK
 MUT_PROB=0.5
-MUT_VAR=0.5
 CROSSOVER_PROB=0.5
 COMPONENT_MUT_PROB=0.5
 TPE_PROB={tpe_prob}
 TOURNAMENT_SIZE=2
 NUM_OFFSPRING=20
-GAMMA=0.2
+GAMMA=0.25
 DATA_DIRECTORY={data_directory}
 # variables that are set by the SLURM job array
 # Each array task is one seed of the single target ({n_seeds} jobs total)
@@ -109,7 +108,6 @@ python {runner} \\
     --pop_size $POP_SIZE \\
     --cores $CORES \\
     --mut_prob $MUT_PROB \\
-    --mut_var $MUT_VAR \\
     --crossover_prob $CROSSOVER_PROB \\
     --component_mut_prob $COMPONENT_MUT_PROB \\
     --tpe_prob $TPE_PROB \\
