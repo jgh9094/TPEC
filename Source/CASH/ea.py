@@ -354,7 +354,6 @@ class EA(BaseEA):
                  pop_size: int,
                  cores: int,
                  mut_prob: float,
-                 mut_var: float,
                  tpe_prob: float,
                  tournament_size: int,
                  num_offspring: int,
@@ -374,8 +373,6 @@ class EA(BaseEA):
             pop_size (int): Population size for the evolutionary algorithm.
             cores (int): Number of CPU cores to use for parallel evaluation.
             mut_prob (float): Per-parameter (gene-level) mutation probability.
-            mut_var (float): Accepted for interface compatibility; unused (mutations resample
-                parameters uniformly).
             tpe_prob (float): Probability an offspring is produced via TPE-guided variation.
             tournament_size (int): Tournament size for parent selection.
             num_offspring (int): Number of pseudo-offspring generated per TPE-guided step
@@ -393,7 +390,7 @@ class EA(BaseEA):
                 (empty/None -> full set). See ``scalers``.
             component_mut_prob (float): Probability a node's COMPONENT is resampled (structural
                 mutation) during a mutation step; otherwise only that component's parameters are
-                shift-mutated.
+                randomly resampled.
             gamma (float): Fraction of history treated as "good" by TPE.
             classification (bool): Whether the pipeline optimizes a classification task (True,
                 scored by ROC-AUC) or a regression task (False, scored by R^2). Selects the
@@ -410,7 +407,6 @@ class EA(BaseEA):
             pop_size=pop_size,
             cores=cores,
             mut_prob=mut_prob,
-            mut_var=mut_var,
             crossover_prob=crossover_prob,
             classification=classification,  # classification (ROC-AUC) or regression (R^2)
         )

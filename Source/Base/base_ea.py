@@ -30,7 +30,6 @@ class BaseEA(ABC):
                  pop_size: int,
                  cores: int,
                  mut_prob: float,
-                 mut_var: float,
                  crossover_prob: float,
                  classification: bool) -> None:
         """
@@ -41,7 +40,6 @@ class BaseEA(ABC):
             pop_size (int): Population size for the evolutionary algorithm.
             cores (int): Number of CPU cores to use for parallel processing.
             mut_prob (float): Per-parameter mutation probability for the mutation operator.
-            mut_var (float): Mutation variance for the evolutionary algorithm.
             crossover_prob (float): Probability that an offspring is generated via crossover;
                 the remaining ``1.0 - crossover_prob`` are generated via mutation. Defaults to
                 0.0 (all mutation, no crossover).
@@ -57,7 +55,6 @@ class BaseEA(ABC):
         assert seed >= 0, "Seed must be a non-negative integer."
         assert pop_size > 0, "Population size must be a positive integer."
         assert cores > 0, "Number of cores must be a positive integer."
-        assert 0.0 <= mut_var, "Mutation variance must be non-negative."
         assert 0.0 <= mut_prob <= 1.0, "Mutation probability must be between 0 and 1."
         assert 0.0 <= crossover_prob <= 1.0, "Crossover probability must be between 0 and 1."
 
@@ -73,7 +70,6 @@ class BaseEA(ABC):
         # ea specific variables
         self.population: List[Individual] = []
         self.mut_prob = mut_prob
-        self.mut_var = mut_var
         # probability an offspring is produced by crossover vs. mutation
         self.crossover_prob = crossover_prob
 
@@ -81,7 +77,6 @@ class BaseEA(ABC):
         self.total_evaluations = 0
 
         # data-related attributes (set by load_data)
-        self.task_id: Optional[int] = None
         self.binary_classification: Optional[bool] = None
         self.labels: Optional[np.ndarray] = None
         self.X_train: Optional[pd.DataFrame] = None

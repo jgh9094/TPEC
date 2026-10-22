@@ -88,8 +88,6 @@ if __name__ == "__main__":
     parser.add_argument('--cores', type=int, required=True, help='Number of CPU cores to use.')
     # mutation probability
     parser.add_argument('--mut_prob', type=float, required=True, help='Probability of mutating each hyperparameter.')
-    # mutation variance
-    parser.add_argument('--mut_var', type=float, required=True, help='Variance for Gaussian mutation.')
     # crossover probability
     parser.add_argument('--crossover_prob', type=float, required=True, help='Probability of applying crossover.')
     # component (structural) mutation probability
@@ -126,7 +124,6 @@ if __name__ == "__main__":
     print(f"Population Size: {args.pop_size}", flush=True)
     print(f"Cores: {args.cores}", flush=True)
     print(f"Mutation Probability: {args.mut_prob}", flush=True)
-    print(f"Mutation Variance: {args.mut_var}", flush=True)
     print(f"Crossover Probability: {args.crossover_prob}", flush=True)
     print(f"Component Mutation Probability: {args.component_mut_prob}", flush=True)
     print(f"TPE Probability: {args.tpe_prob}", flush=True)
@@ -159,7 +156,6 @@ if __name__ == "__main__":
         pop_size=args.pop_size,
         cores=args.cores,
         mut_prob=args.mut_prob,
-        mut_var=args.mut_var,
         tpe_prob=args.tpe_prob,
         tournament_size=args.tournament_size,
         num_offspring=args.num_offspring,
