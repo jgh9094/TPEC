@@ -81,13 +81,13 @@ TRAIN_P=0.80
 GENS={gens}
 POP_SIZE={pop_size}
 CORES=$SLURM_CPUS_PER_TASK
-MUT_PROB=0.5
+MUT_PROB=1.0
 CROSSOVER_PROB=0.5
 COMPONENT_MUT_PROB=0.5
 TPE_PROB={tpe_prob}
 TOURNAMENT_SIZE=5
 NUM_OFFSPRING=20
-GAMMA=0.25
+GAMMA=0.3
 DATA_DIRECTORY={data_directory}
 # variables that are set by the SLURM job array
 # Each array task is one seed of the single target ({n_seeds} jobs total)
