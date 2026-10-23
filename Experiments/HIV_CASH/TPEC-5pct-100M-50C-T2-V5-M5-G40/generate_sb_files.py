@@ -60,7 +60,7 @@ STRATEGY_CONFIGS = {
 # --- constants shared by every file ---------------------------------------------------
 DATA_DIRECTORY = "/home/hernandezj45/Repos/TPEC/Data/HIV/ecoxai_dataset_5pct_no_PHI.csv"
 RUNNER = "/home/hernandezj45/Repos/TPEC/Experiments/HIV_CASH/runner.py"
-RESULTS_ROOT = "/home/hernandezj45/Repos/TPEC/Results_HIV_5pct_T2_V5_M5_G40/CASH"
+RESULTS_ROOT = "/home/hernandezj45/Repos/TPEC/Results_HIV_5pct_T2_G40/CASH"
 
 TEMPLATE = """\
 #!/bin/bash -l
@@ -83,7 +83,7 @@ POP_SIZE={pop_size}
 CORES=$SLURM_CPUS_PER_TASK
 MUT_PROB=1.0
 CROSSOVER_PROB=0.5
-COMPONENT_MUT_PROB=0.5
+COMPONENT_MUT_PROB=0.25
 TPE_PROB={tpe_prob}
 TOURNAMENT_SIZE=2
 NUM_OFFSPRING=20
