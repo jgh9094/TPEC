@@ -14,10 +14,10 @@ There is no model dimension: CASH evolves the whole pipeline, including the esti
 2 x 4 = 8 files, each a 21-task array (one array task per seed of the single target).
 
 The budget counts candidates considered: the EA's initial population plus one offspring population
-per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 25, GENS is derived per budget:
+per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 50, GENS is derived per budget:
 
-    200_Evals  -> GENS = 7    (25 * 8  = 200)
-    300_Evals  -> GENS = 11   (25 * 12 = 300)
+    200_Evals  -> GENS = 3    (50 * 4  = 200)
+    300_Evals  -> GENS = 5    (50 * 6  = 300)
 
 The data, tasks, seeds, train proportion and EA settings match the HPO TPEC sweep
 (Experiments/HPO/TPEC/generate_sb_files.py); COMPONENT_MUT_PROB is CASH-only.
@@ -32,7 +32,7 @@ TPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- factorial dimensions ------------------------------------------------------------
 
-POP_SIZE = 25
+POP_SIZE = 50
 
 # the single target (y_label) used for every run in this sweep
 TASK_ID = "virologic_failure"
