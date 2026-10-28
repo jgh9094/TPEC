@@ -114,7 +114,7 @@ class GradientBoostParams(ModelParams):
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 8), type='int'),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
