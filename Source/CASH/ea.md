@@ -83,8 +83,9 @@ runnable scikit-learn `Pipeline`:
 - `build_estimator(component_name, eval_kwargs, classification)`
   ([ea.py:137](Source/CASH/ea.py#L137)) — instantiate one node's scikit-learn estimator from its
   `eval_parameters` kwargs. Handles the few special cases: `MLP` recombines `layer_1..layer_5` into
-  `hidden_layer_sizes`; `KSVC` adds `probability=True`; the predictor table is chosen by
-  `classification`.
+  `hidden_layer_sizes`; `KSVC` adds `probability=True`; `XGB` sets `n_jobs=1` (one Ray task per fold,
+  so xgboost gets one thread). The predictor table is chosen by `classification`, and its XGB
+  classifier is `AnyLabelXGBClassifier`, which accepts any label coding.
 - `assemble_steps(pipeline_steps, scale_cols, classification)`
   ([ea.py:181](Source/CASH/ea.py#L181)) — turn resolved `(node, component, kwargs)` triples into
   `(name, estimator)` steps, **dropping any `passthrough` node** (no identity step inserted), and

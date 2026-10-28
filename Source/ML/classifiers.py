@@ -8,8 +8,10 @@
 #
 ##########################################################################################
 
+import numpy as np
 from typeguard import typechecked
 from typing import Dict, Any, Optional
+from xgboost import XGBClassifier
 
 from Source.Base.model_param_space import ModelParams, DataContext, IntParam, FloatParam, CatParam
 
@@ -20,7 +22,7 @@ class RandomForestParams(ModelParams):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
@@ -55,7 +57,7 @@ class ExtraTreesParams(ModelParams):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
         })
@@ -191,7 +193,66 @@ class MLPClassifierParams(ModelParams):
         return "MLP"
 
 
+class AnyLabelXGBClassifier(XGBClassifier):
+    """
+    XGBClassifier that accepts any label values, as the other scikit-learn classifiers here do.
+
+    XGBoost requires the training labels to be exactly 0..K-1, so a target coded 1/2 or with string
+    classes fails inside ``fit``. This subclass maps the observed labels onto 0..K-1 for training and
+    maps ``predict`` back to the original values. ``predict_proba`` columns follow the sorted label
+    order either way, so probability-based scoring (ROC AUC) is unchanged.
+    """
+    def fit(self, X, y, **kwargs):
+        self.label_values_ = np.unique(y)
+        return super().fit(X, np.searchsorted(self.label_values_, y), **kwargs)
+
+    def predict(self, X, **kwargs):
+        return self.label_values_[super().predict(X, **kwargs).astype(int)]
+
+
+@typechecked
+class XGBClassifierParams(ModelParams):
+    """
+    Parameter space for XGBoost's gradient-boosted trees (``AnyLabelXGBClassifier``).
+
+    Mirrors GradientBoostParams where a hyperparameter has a counterpart (``n_estimators``,
+    ``learning_rate``, ``max_depth``, ``subsample``); ``colsample_bytree`` plays the role of
+    GradientBoost's ``max_features``. The regularisers (``min_child_weight``, ``reg_alpha``,
+    ``reg_lambda``) are XGBoost's own. The objective is left to XGBoost, which picks binary logistic
+    or softmax from the number of classes, so the space needs no n_classes-dependent restriction.
+    """
+    def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
+        super().__init__(param_space={
+            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'colsample_bytree': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'min_child_weight': FloatParam(bounds=(1e-2, 2e2), type='float', log=True),
+            'reg_alpha': FloatParam(bounds=(1e-3, 1e2), type='float', log=True),
+            'reg_lambda': FloatParam(bounds=(1e-3, 1e3), type='float', log=True),
+            'gamma': FloatParam(bounds=(1e-8, 1e2), type='float', log=True),
+        })
+
+    def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
+        """ Fixes a set of parameters for hard evaluation with XGBoost. """
+        return {'n_estimators': model_params['n_estimators'],
+                'learning_rate': model_params['learning_rate'],
+                'max_depth': model_params['max_depth'],
+                'subsample': model_params['subsample'],
+                'colsample_bytree': model_params['colsample_bytree'],
+                'min_child_weight': model_params['min_child_weight'],
+                'reg_alpha': model_params['reg_alpha'],
+                'reg_lambda': model_params['reg_lambda'],
+                'gamma': model_params['gamma'],
+                'random_state': random_state}
+
+    def get_model_type(self) -> str:
+        return "XGB"
+
+
 CLASSIFIERS = (
     RandomForestParams, ExtraTreesParams, KernelSVCParams,
     GradientBoostParams, KNeighborsClassifierParams, MLPClassifierParams,
+    XGBClassifierParams,
 )

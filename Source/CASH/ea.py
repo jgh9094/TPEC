@@ -50,6 +50,7 @@ from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, Gradien
 from sklearn.svm import SVC, SVR
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from xgboost import XGBRegressor
 
 from Source.Base.base_ea import BaseEA
 from Source.Base.individual import Individual
@@ -66,7 +67,7 @@ from Source.Base.archive import (
 from Source.ML.scaler import SCALERS
 from Source.ML.transformer import TRANSFORMERS
 from Source.ML.selector import SELECTORS
-from Source.ML.classifiers import CLASSIFIERS
+from Source.ML.classifiers import CLASSIFIERS, AnyLabelXGBClassifier
 from Source.ML.regressor import REGRESSORS
 from Source.ML.complexity import calculate_model_complexity
 
@@ -124,6 +125,7 @@ COMPONENT_CLASSES = {
     "GB": GradientBoostingClassifier,
     "KNN": KNeighborsClassifier,
     "MLP": MLPClassifier,
+    "XGB": AnyLabelXGBClassifier,
 }
 COMPONENT_CLASSES_REGRESSION = {
     **PREPROCESSING_CLASSES,
@@ -133,6 +135,7 @@ COMPONENT_CLASSES_REGRESSION = {
     "GB": GradientBoostingRegressor,
     "KNN": KNeighborsRegressor,
     "MLP": MLPRegressor,
+    "XGB": XGBRegressor,
 }
 
 
@@ -150,6 +153,9 @@ def build_estimator(component_name: str, eval_kwargs: Dict[str, Any], classifica
       * ``KSVC`` -- ``probability=True`` is required so the classification pipeline predictor can
         expose ``predict_proba`` for ROC-AUC scoring.
       * ``SVR`` -- the regression kernel-SVM predictor, built directly from its kwargs.
+      * ``XGB`` -- ``n_jobs=1``, since each candidate fold is one Ray task; xgboost would otherwise
+        use every core on the node. The classifier also accepts any label coding (see
+        AnyLabelXGBClassifier).
 
     Args:
         component_name (str): The component identifier (its ModelParams.get_model_type()).
@@ -165,6 +171,8 @@ def build_estimator(component_name: str, eval_kwargs: Dict[str, Any], classifica
         layers = tuple(kwargs.pop(f"layer_{i}") for i in range(1, 6))
         mlp_cls = MLPClassifier if classification else MLPRegressor
         return mlp_cls(hidden_layer_sizes=layers, **kwargs)
+    if component_name == "XGB":
+        kwargs["n_jobs"] = 1
     if component_name == "KSVC":
         return SVC(**kwargs, probability=True)
     if component_name == "SVR":
@@ -532,7 +540,7 @@ class EA(BaseEA):
         pipeline_space: PipelineSpace = {}
         for node, registry, allow_passthrough in PIPELINE_NODES:
             # the predictor node's registry is task-dependent: classifiers for classification,
-            # regressors for regression (both share the same six model-family identifiers, except
+            # regressors for regression (both share the same seven model-family identifiers, except
             # the kernel-SVM, which is "KSVC" vs. "SVR"). Preprocessing nodes are task-agnostic.
             if node == PREDICTOR_NODE and not self.classification:
                 registry = REGRESSORS

@@ -25,6 +25,7 @@ from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.metrics import roc_auc_score, r2_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
+from xgboost import XGBRegressor
 
 from Source.Base.base_ea import BaseEA
 from Source.Base.individual import Individual
@@ -41,16 +42,16 @@ from Source.Base.archive import (
 from Source.Base.model_param_space import DataContext
 from Source.ML.classifiers import (
     RandomForestParams, ExtraTreesParams, KernelSVCParams, GradientBoostParams,
-    KNeighborsClassifierParams, MLPClassifierParams
+    KNeighborsClassifierParams, MLPClassifierParams, XGBClassifierParams, AnyLabelXGBClassifier,
 )
 from Source.ML.regressor import (
     RandomForestRegressorParams, ExtraTreesRegressorParams, KernelSVRParams,
-    GradientBoostRegressorParams, KNeighborsRegressorParams, MLPRegressorParams
+    GradientBoostRegressorParams, KNeighborsRegressorParams, MLPRegressorParams, XGBRegressorParams,
 )
 from Source.HPO.cv_evaluation import (
-    cv_random_forest, cv_extra_trees, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp,
+    cv_random_forest, cv_extra_trees, cv_kernel_svc, cv_gradient_boost, cv_knn, cv_mlp, cv_xgboost,
     cv_random_forest_reg, cv_extra_trees_reg, cv_kernel_svr, cv_gradient_boost_reg,
-    cv_knn_reg, cv_mlp_reg,
+    cv_knn_reg, cv_mlp_reg, cv_xgboost_reg,
 )
 
 # Validation performance forced onto an individual when any CV fold fails (a "complete penalty":
@@ -77,7 +78,7 @@ class EA(BaseEA):
                  pop_size: int,
                  cores: int,
                  mut_prob: float,
-                 model: str,  # classification: ['RF','ET','KSVC','GB','KNN','MLP']; regression: ['RF','ET','SVR','GB','KNN','MLP']
+                 model: str,  # classification: ['RF','ET','KSVC','GB','KNN','MLP','XGB']; regression: ['RF','ET','SVR','GB','KNN','MLP','XGB']
                  tpe_prob: float,
                  tournament_size: int,
                  num_offspring: int,
@@ -89,8 +90,8 @@ class EA(BaseEA):
 
         Args:
             model (str): The type of model to optimize. For classification (``classification=True``)
-                one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']; for regression
-                (``classification=False``) one of ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP']. The
+                one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP', 'XGB']; for regression
+                (``classification=False``) one of ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP', 'XGB']. The
                 kernel-SVM token differs by mode ('KSVC' for classification, 'SVR' for regression)
                 and each is only valid in its own mode.
             tpe_prob (float): Probability of using TPE-based selection.
@@ -122,8 +123,8 @@ class EA(BaseEA):
         # store model type for deferred param_space creation (after load_data sets binary_classification).
         # The kernel-SVM token is mode-specific: 'KSVC' (classifier) vs 'SVR' (regressor); each is
         # only legal in its own mode, so the model must match the classification flag.
-        valid_models = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP'] if classification \
-            else ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP']
+        valid_models = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP', 'XGB'] if classification \
+            else ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP', 'XGB']
         if model not in valid_models:
             raise ValueError(
                 f"Unknown model type '{model}' for {'classification' if classification else 'regression'}. "
@@ -204,6 +205,7 @@ class EA(BaseEA):
                 'GB': (GradientBoostParams(self.data_ctx), cv_gradient_boost),
                 'KNN': (KNeighborsClassifierParams(self.data_ctx), cv_knn),
                 'MLP': (MLPClassifierParams(self.data_ctx), cv_mlp),
+                'XGB': (XGBClassifierParams(self.data_ctx), cv_xgboost),
             }
         else:
             model_configs = {
@@ -213,6 +215,7 @@ class EA(BaseEA):
                 'GB': (GradientBoostRegressorParams(self.data_ctx), cv_gradient_boost_reg),
                 'KNN': (KNeighborsRegressorParams(self.data_ctx), cv_knn_reg),
                 'MLP': (MLPRegressorParams(self.data_ctx), cv_mlp_reg),
+                'XGB': (XGBRegressorParams(self.data_ctx), cv_xgboost_reg),
             }
         self.param_space, self.ray_train_func = model_configs[self.model]
 
@@ -995,8 +998,11 @@ class EA(BaseEA):
                                  alpha=eval_params['alpha'],
                                  max_iter=eval_params['max_iter'],
                                  random_state=eval_params['random_state'])
+        elif model_type == 'XGB':
+            eval_params = XGBClassifierParams(self.data_ctx).eval_parameters(model_params, random_state=self.seed)
+            return AnyLabelXGBClassifier(**eval_params, n_jobs=self.cores)
         else:
-            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP']")
+            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP', 'XGB']")
 
     def _build_regressor(self, model_type: str, model_params: dict):
         """Builds a fitted-ready sklearn regressor for the given model type and genotype.
@@ -1032,8 +1038,11 @@ class EA(BaseEA):
                                 alpha=eval_params['alpha'],
                                 max_iter=eval_params['max_iter'],
                                 random_state=eval_params['random_state'])
+        elif model_type == 'XGB':
+            eval_params = XGBRegressorParams(self.data_ctx).eval_parameters(model_params, random_state=self.seed)
+            return XGBRegressor(**eval_params, n_jobs=self.cores)
         else:
-            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP']")
+            raise ValueError(f"Unknown model type: {model_type}. Must be one of ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP', 'XGB']")
 
     def save_results(self, save_dir: str) -> None:
         """

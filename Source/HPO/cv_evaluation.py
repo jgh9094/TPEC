@@ -30,6 +30,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.metrics import roc_auc_score, r2_score
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from xgboost import XGBClassifier, XGBRegressor
 
 
 # =========================================================================================
@@ -165,6 +166,58 @@ def cv_gradient_boost(
 
     except Exception as e:
         print(f"Error in cv_gradient_boost: {e}")
+        return id, 0.0, 0.0, -1.0
+
+@ray.remote
+def cv_xgboost(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
+    model_params: Dict[str, Any],
+    id: int,
+    binary_class: bool,
+    labels: np.ndarray
+) -> Tuple[int, float, float, float]:
+    """
+    Train and evaluate an XGBClassifier using Ray.
+
+    XGBoost needs training labels coded 0..K-1, so the labels are encoded here against ``labels``
+    (the sorted class set, which is also the column order of ``predict_proba``). Scoring uses the
+    original y values, so the result matches AnyLabelXGBClassifier on the driver.
+
+    This function must not reference anything under ``Source``: Ray workers in the HPO runners do
+    not have the repository on their path, so the encoding is repeated inline rather than imported.
+
+    Parameters:
+        X_train: Training features
+        y_train: Training labels
+        X_validate: Validation features
+        y_validate: Validation labels
+        model_params: Dictionary of hyperparameters for XGBClassifier
+            (already includes ``random_state`` when the caller seeded eval_parameters)
+        id: Identifier for this model instance
+        binary_class: True for binary classification, False for multi-class
+        labels: Sorted array of all possible class labels
+
+    Returns:
+        Tuple of (id, training_auc, validation_auc, status)
+        status: 1.0 if successful, -1.0 if error occurred
+    """
+    try:
+        # one thread per Ray task; xgboost would otherwise use every core on the node
+        model = XGBClassifier(**model_params, n_jobs=1)
+        model.fit(X_train, np.searchsorted(labels, y_train))
+        if binary_class:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train)[:, 1]))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate)[:, 1]))
+        else:
+            train_acc = float(roc_auc_score(y_train, model.predict_proba(X_train), multi_class='ovo', labels=labels))
+            val_acc = float(roc_auc_score(y_validate, model.predict_proba(X_validate), multi_class='ovo', labels=labels))
+        return id, train_acc, val_acc, 1.0
+
+    except Exception as e:
+        print(f"Error in cv_xgboost: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote
@@ -405,6 +458,35 @@ def cv_gradient_boost_reg(
 
     except Exception as e:
         print(f"Error in cv_gradient_boost_reg: {e}")
+        return id, 0.0, 0.0, -1.0
+
+@ray.remote
+def cv_xgboost_reg(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_validate: np.ndarray,
+    y_validate: np.ndarray,
+    model_params: Dict[str, Any],
+    id: int,
+    binary_class: Optional[bool] = None,
+    labels: Optional[np.ndarray] = None
+) -> Tuple[int, float, float, float]:
+    """
+    Train and evaluate an XGBRegressor using Ray, scored with R^2.
+
+    ``binary_class`` and ``labels`` are accepted for signature parity and ignored. Returns
+    (id, train_r2, val_r2, status). Imports only xgboost, like cv_xgboost (see its docstring).
+    """
+    try:
+        # one thread per Ray task; xgboost would otherwise use every core on the node
+        model = XGBRegressor(**model_params, n_jobs=1)
+        model.fit(X_train, y_train)
+        train_r2 = float(r2_score(y_train, model.predict(X_train)))
+        val_r2 = float(r2_score(y_validate, model.predict(X_validate)))
+        return id, train_r2, val_r2, 1.0
+
+    except Exception as e:
+        print(f"Error in cv_xgboost_reg: {e}")
         return id, 0.0, 0.0, -1.0
 
 @ray.remote

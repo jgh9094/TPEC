@@ -26,6 +26,9 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.svm import SVC, SVR
+from xgboost import XGBRegressor
+
+from Source.ML.classifiers import AnyLabelXGBClassifier
 
 
 def tree_complexity(tree) -> int:
@@ -39,6 +42,12 @@ def forest_complexity(forest) -> int:
     if len(all_trees.shape) > 1:
         all_trees = all_trees.ravel()
     return int(sum(tree_complexity(tree) for tree in all_trees))
+
+
+def xgboost_complexity(model) -> int:
+    # one row per node across all stored trees (including every class's trees in multiclass); each
+    # node is counted with the same 5 parameters as tree_complexity
+    return int(len(model.get_booster().trees_to_dataframe()) * 5)
 
 
 def knn_complexity(knn) -> int:
@@ -69,6 +78,8 @@ COMPLEXITY_PER_ESTIMATOR = {
     KNeighborsRegressor: knn_complexity,
     MLPClassifier: mlp_complexity,
     MLPRegressor: mlp_complexity,
+    AnyLabelXGBClassifier: xgboost_complexity,
+    XGBRegressor: xgboost_complexity,
 }
 
 

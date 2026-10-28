@@ -30,7 +30,7 @@ class RandomForestRegressorParams(ModelParams):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'criterion': CatParam(bounds=('squared_error', 'absolute_error', 'friedman_mse'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
@@ -63,7 +63,7 @@ class ExtraTreesRegressorParams(ModelParams):
         super().__init__(param_space={
             'n_estimators': IntParam(bounds=(100, 1000), type='int'),
             'criterion': CatParam(bounds=('squared_error', 'absolute_error', 'friedman_mse'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 30), type='int'),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
@@ -205,10 +205,52 @@ class MLPRegressorParams(ModelParams):
         return "MLP"
 
 
+@typechecked
+class XGBRegressorParams(ModelParams):
+    """
+    Parameter space for XGBoost's gradient-boosted trees (``xgboost.XGBRegressor``).
+
+    The regression counterpart of XGBClassifierParams: the classifier's hyperparameters except
+    ``gamma`` (not searched here), plus
+    ``objective``, which selects among XGBoost's regression losses. The numeric ranges are declared
+    in this class and can differ from the classifier's. Quantile loss is omitted because it needs an
+    extra ``quantile_alpha`` that the flat parameter space cannot supply.
+    """
+    def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
+        super().__init__(param_space={
+            'objective': CatParam(bounds=('reg:squarederror', 'reg:absoluteerror', 'reg:pseudohubererror'), type='cat'),
+            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
+            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'colsample_bytree': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
+            'min_child_weight': FloatParam(bounds=(1e-2, 1e2), type='float', log=True),
+            'reg_alpha': FloatParam(bounds=(1e-3, 1e1), type='float', log=True),
+            'reg_lambda': FloatParam(bounds=(1e-3, 1e2), type='float', log=True),
+        })
+
+    def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
+        """ Fixes a set of parameters for hard evaluation with XGBoost. """
+        return {'objective': model_params['objective'],
+                'n_estimators': model_params['n_estimators'],
+                'learning_rate': model_params['learning_rate'],
+                'max_depth': model_params['max_depth'],
+                'subsample': model_params['subsample'],
+                'colsample_bytree': model_params['colsample_bytree'],
+                'min_child_weight': model_params['min_child_weight'],
+                'reg_alpha': model_params['reg_alpha'],
+                'reg_lambda': model_params['reg_lambda'],
+                'random_state': random_state}
+
+    def get_model_type(self) -> str:
+        return "XGB"
+
+
 # Registry of the regressor parameter-space classes, mirroring Source.ML.classifiers.CLASSIFIERS.
-# Order matches the classifier registry (RF, ET, kernel SVM, GB, KNN, MLP) so the CASH predictor
-# node offers the same six model families for regression as it does for classification.
+# Order matches the classifier registry (RF, ET, kernel SVM, GB, KNN, MLP, XGB) so the CASH predictor
+# node offers the same seven model families for regression as it does for classification.
 REGRESSORS = (
     RandomForestRegressorParams, ExtraTreesRegressorParams, KernelSVRParams,
     GradientBoostRegressorParams, KNeighborsRegressorParams, MLPRegressorParams,
+    XGBRegressorParams,
 )
