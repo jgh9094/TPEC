@@ -20,7 +20,7 @@ SCALERS = ['MinMaxScaler', 'RobustScaler', 'StandardScaler', 'MaxAbsScaler', 'No
 TRANSFORMERS = ['KBinsDiscretizer', 'Binarizer', 'PCA', 'FastICA', 'FeatureAgglomeration',
                 'Nystroem', 'RBFSampler', 'QuantileTransformer', 'PowerTransformer']
 SELECTORS = ['SelectFwe', 'SelectPercentile', 'VarianceThreshold']
-CLASSIFIERS = ['RF', 'ET', 'KSVC', 'GB', 'KNN']
+CLASSIFIERS = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'XGB']
 
 
 def load_hiv_data(data_directory: Path, y_label: str):
