@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit generated TPOT arrays. Usage: ./submit_all.sh [--dry-run] [Pop25|Pop50|Pop100]
+# Submit TPOT arrays. Usage: ./submit_all.sh [--dry-run] [Constrained|Graph]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +26,7 @@ while IFS= read -r -d '' batch_file; do
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "[dry-run] would submit: $batch_file"
     else
+        mkdir -p "$(dirname "$batch_file")/logs"
         echo "Submitting: $batch_file"
         sbatch "$batch_file"
     fi

@@ -1,4 +1,4 @@
-"""Translate the full Source/ML CASH space into TPOT search-space nodes."""
+"""Translate the Source/ML CASH operators into linear and graph TPOT spaces."""
 
 from functools import partial
 from typing import Dict, Optional, Type, Union
@@ -26,7 +26,6 @@ from sklearn.preprocessing import (
     MaxAbsScaler,
     MinMaxScaler,
     Normalizer,
-    PolynomialFeatures,
     PowerTransformer,
     QuantileTransformer,
     RobustScaler,
@@ -58,7 +57,6 @@ ModelParamsType = Type[ModelParams]
 PREPROCESSING_CLASSES = {
     "KBinsDiscretizer": KBinsDiscretizer,
     "Binarizer": Binarizer,
-    "PolynomialFeatures": PolynomialFeatures,
     "PCA": PCA,
     "FastICA": FastICA,
     "FeatureAgglomeration": FeatureAgglomeration,
@@ -70,6 +68,8 @@ PREPROCESSING_CLASSES = {
     "SelectPercentile": SelectPercentile,
     "VarianceThreshold": VarianceThreshold,
 }
+
+EXCLUDED_OPERATOR_NAMES = {"PolynomialFeatures"}
 
 CLASSIFIER_CLASSES = {
     "RF": RandomForestClassifier,
@@ -210,10 +210,30 @@ def make_choice_space(
     seed: int,
     allow_passthrough: bool,
 ):
+    nodes = make_operator_nodes(
+        registry=registry,
+        estimator_classes=estimator_classes,
+        data_context=data_context,
+        seed=seed,
+    )
+    if allow_passthrough:
+        nodes.append(tpot.search_spaces.nodes.EstimatorNode(Passthrough, {}))
+    return tpot.search_spaces.pipelines.ChoicePipeline(search_spaces=nodes)
+
+
+def make_operator_nodes(
+    registry,
+    estimator_classes,
+    data_context: DataContext,
+    seed: int,
+):
+    """Create TPOT nodes from a Source.ML registry and its parameter spaces."""
     nodes = []
     for model_param_class in registry:
         model_params = model_param_class(data_context)
         component_name = model_params.get_model_type()
+        if component_name in EXCLUDED_OPERATOR_NAMES:
+            continue
         nodes.append(
             tpot.search_spaces.nodes.EstimatorNode(
                 method=estimator_classes[component_name],
@@ -226,9 +246,7 @@ def make_choice_space(
                 ),
             )
         )
-    if allow_passthrough:
-        nodes.append(tpot.search_spaces.nodes.EstimatorNode(Passthrough, {}))
-    return tpot.search_spaces.pipelines.ChoicePipeline(search_spaces=nodes)
+    return nodes
 
 
 def make_scaler_choice_space(
@@ -236,6 +254,17 @@ def make_scaler_choice_space(
     seed: int,
     scale_columns: Optional[tuple[int, ...]],
 ):
+    nodes = make_scaler_nodes(data_context, seed, scale_columns)
+    nodes.append(tpot.search_spaces.nodes.EstimatorNode(Passthrough, {}))
+    return tpot.search_spaces.pipelines.ChoicePipeline(search_spaces=nodes)
+
+
+def make_scaler_nodes(
+    data_context: DataContext,
+    seed: int,
+    scale_columns: Optional[tuple[int, ...]],
+):
+    """Create the shared column-aware scaler nodes used by both topologies."""
     nodes = []
     for model_param_class in SCALERS:
         model_params = model_param_class(data_context)
@@ -253,8 +282,7 @@ def make_scaler_choice_space(
                 ),
             )
         )
-    nodes.append(tpot.search_spaces.nodes.EstimatorNode(Passthrough, {}))
-    return tpot.search_spaces.pipelines.ChoicePipeline(search_spaces=nodes)
+    return nodes
 
 
 def generate_tpot_search_space(
@@ -292,3 +320,65 @@ def generate_tpot_search_space(
         ),
     ]
     return tpot.search_spaces.pipelines.SequentialPipeline(search_spaces=stages)
+
+
+def generate_tpot_graph_search_space(
+    *,
+    data_context: DataContext,
+    seed: int,
+    classification: bool,
+    n_folds: int,
+    scale_columns: Optional[tuple[int, ...]],
+):
+    """Build a DAG from the same operators and hyperparameters as the linear space."""
+    from sklearn.model_selection import KFold, StratifiedKFold
+
+    predictor_registry = CLASSIFIERS if classification else REGRESSORS
+    predictor_classes = CLASSIFIER_CLASSES if classification else REGRESSOR_CLASSES
+    predictor_nodes = make_operator_nodes(
+        predictor_registry,
+        predictor_classes,
+        data_context,
+        seed,
+    )
+    scaler_nodes = make_scaler_nodes(data_context, seed, scale_columns)
+    transformer_nodes = make_operator_nodes(
+        TRANSFORMERS,
+        PREPROCESSING_CLASSES,
+        data_context,
+        seed,
+    )
+    selector_nodes = make_operator_nodes(
+        SELECTORS,
+        PREPROCESSING_CLASSES,
+        data_context,
+        seed,
+    )
+
+    # Root nodes must be predictors. Inner nodes retain GraphSearchPipeline's flexible
+    # topology and may be predictors (stacking), preprocessors, or passthrough, but every
+    # node and parameter domain comes from the same Source.ML definitions as Constrained.
+    root_search_space = tpot.search_spaces.pipelines.ChoicePipeline(
+        search_spaces=predictor_nodes
+    )
+    inner_search_space = tpot.search_spaces.pipelines.ChoicePipeline(
+        search_spaces=[
+            *predictor_nodes,
+            *scaler_nodes,
+            *transformer_nodes,
+            *selector_nodes,
+            tpot.search_spaces.nodes.EstimatorNode(Passthrough, {}),
+        ]
+    )
+    cross_val_predict_cv = (
+        StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+        if classification
+        else KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    )
+    return tpot.search_spaces.pipelines.GraphSearchPipeline(
+        root_search_space=root_search_space,
+        leaf_search_space=None,
+        inner_search_space=inner_search_space,
+        cross_val_predict_cv=cross_val_predict_cv,
+        max_size=15,
+    )
