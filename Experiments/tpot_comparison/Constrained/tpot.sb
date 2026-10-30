@@ -2,11 +2,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --time=05:00:00
+#SBATCH --time=4-00:00:00
 #SBATCH --mem=200G
-#SBATCH --job-name=tpot_P50
-#SBATCH -p defq,moore,preemptable
+#SBATCH --job-name=tpot_constrained
+#SBATCH -p defq,moore
 #SBATCH --array=1-63
+#SBATCH --output=/home/sainia3/TPEC/Experiments/tpot_comparison/Constrained/logs/tpot_%A_%a.out
 
 set -euo pipefail
 
@@ -14,21 +15,24 @@ source ~/anaconda3/etc/profile.d/conda.sh
 conda activate tpotenv
 
 TRAIN_P=0.70
-POP_SIZE=50
-GENERATIONS=10
+POP_SIZE=25
+GENERATIONS=19
 N_EVALUATIONS=500
 N_FOLDS=5
-MAX_EVAL_TIME_MINS=60
+MAX_EVAL_TIME_MINS=5
 CORES=$SLURM_CPUS_PER_TASK
-DATA_PATH=/home/hernandezj45/Repos/TPEC/Data/SO/combined.csv
-RUNNER=/home/hernandezj45/Repos/TPEC/Experiments/tpot_comparison/tpot_wrapper.py
-RESULTS_ROOT=/home/hernandezj45/Repos/TPEC/Results_TPOT
+SEARCH_SPACE=constrained
+DATA_PATH=/home/sainia3/TPEC/Data-Tools/spinal_surgery
+RUNNER=/home/sainia3/TPEC/Experiments/tpot_comparison/tpot_wrapper.py
+RESULTS_ROOT=/home/sainia3/TPEC/Results_TPOT_SpinalSurgery_CustomCVObjective
 TASK_IDS=(LOS_extended discharge_Home HOSP_READM_90)
 
 TASK_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 21 ))
-SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 ))
+SEED=$(( (SLURM_ARRAY_TASK_ID - 1) % 21 + 1 ))
 TASK_ID=${TASK_IDS[$TASK_INDEX]}
-OUTPUT_DIRECTORY=${RESULTS_ROOT}/Pop${POP_SIZE}/TPOT_CASH/Task_${TASK_ID}/Seed_${SEED}/
+OUTPUT_DIRECTORY=${RESULTS_ROOT}/Pop${POP_SIZE}/Constrained/Task_${TASK_ID}/Seed_${SEED}/
+
+python -c 'import tpot; print("TPOT version:", tpot.__version__)'
 
 python "$RUNNER" \
     --seed "$SEED" \
@@ -37,6 +41,7 @@ python "$RUNNER" \
     --data_path "$DATA_PATH" \
     --train_p "$TRAIN_P" \
     --output_directory "$OUTPUT_DIRECTORY" \
+    --search_space "$SEARCH_SPACE" \
     --classification true \
     --cores "$CORES" \
     --pop_size "$POP_SIZE" \
