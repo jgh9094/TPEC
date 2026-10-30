@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # gamma for TPE
     parser.add_argument('--gamma', type=float, required=True, help='Gamma parameter for TPE (fraction of samples considered good).')
     # number of cross-validation folds
-    parser.add_argument('--n_folds', type=int, default=5, help='Number of cross-validation folds. Default 5.')
+    parser.add_argument('--n_folds', type=int, default=10, help='Number of cross-validation folds. Default 5.')
 
     args = parser.parse_args()
 
