@@ -7,20 +7,20 @@ The sweep varies two dimensions, each encoded by a directory level under
 
     <budget>_Evals / <strategy> / cash.sb
 
-  * Evaluation budget -> 200_Evals / 300_Evals
+  * Evaluation budget -> 100_Evals / 200_Evals
   * Search strategy   -> EA, TPE25, TPE50, TPE100
 
 There is no model dimension: CASH evolves the whole pipeline, including the estimator. That is
 2 x 4 = 8 files, each a 21-task array (one array task per seed of the single target).
 
 The budget counts candidates considered: the EA's initial population plus one offspring population
-per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 25, GENS is derived per budget:
+per generation, POP_SIZE * (GENS + 1). With POP_SIZE = 10, GENS is derived per budget:
 
-    200_Evals  -> GENS = 7    (25 * 8  = 200)
-    300_Evals  -> GENS = 11   (25 * 12 = 300)
+    100_Evals  -> GENS = 9    (10 * 10 = 100)
+    200_Evals  -> GENS = 19   (10 * 20 = 200)
 
 The data, tasks, seeds, train proportion and EA settings match the HPO TPEC sweep
-(Experiments/HPO/TPEC/generate_sb_files.py); COMPONENT_MUT_PROB is CASH-only.
+(Experiments/HPO/TPEC/generate_sb_files.py) except POP_SIZE; COMPONENT_MUT_PROB is CASH-only.
 
 Running this script overwrites any existing .sb files in place. Paths inside the files are
 the cluster paths (``/home/hernandezj45/Repos/TPEC/...``), not local repo paths.
@@ -32,7 +32,7 @@ TPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- factorial dimensions ------------------------------------------------------------
 
-POP_SIZE = 25
+POP_SIZE = 10
 
 # the single target (y_label) used for every run in this sweep
 TASK_ID = "virologic_failure"
@@ -42,8 +42,8 @@ N_SEEDS = 21
 
 # budget directory -> total candidates considered
 BUDGET_CONFIGS = {
+    "100_Evals": 100,
     "200_Evals": 200,
-    "300_Evals": 300,
 }
 
 # strategy directory -> (TPE_PROB, short code for the job name)
