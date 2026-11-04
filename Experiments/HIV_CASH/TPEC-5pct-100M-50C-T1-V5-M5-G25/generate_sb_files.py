@@ -86,7 +86,7 @@ CROSSOVER_PROB=0.5
 COMPONENT_MUT_PROB=0.25
 TPE_PROB={tpe_prob}
 TOURNAMENT_SIZE=1
-NUM_OFFSPRING=20
+NUM_OFFSPRING=10
 GAMMA=0.25
 DATA_DIRECTORY={data_directory}
 # variables that are set by the SLURM job array
