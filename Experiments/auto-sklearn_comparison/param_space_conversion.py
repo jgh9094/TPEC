@@ -95,7 +95,7 @@ from sklearn.ensemble import (
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.svm import SVC, SVR
-from xgboost import XGBClassifier
+from xgboost import XGBClassifier, XGBRegressor
 
 from Source.Base.model_param_space import (
     BoolParam,
@@ -109,7 +109,6 @@ from Source.ML.classifiers import CLASSIFIERS
 from Source.ML.regressor import REGRESSORS
 from Source.ML.selector import SELECTORS
 from Source.ML.transformer import TRANSFORMERS
-
 
 ParamSpec = Union[IntParam, FloatParam, CatParam, BoolParam]
 ParamSpace = Dict[str, ParamSpec]
@@ -150,6 +149,7 @@ REGRESSOR_CLASSES = {
     "GB": GradientBoostingRegressor,
     "KNN": KNeighborsRegressor,
     "MLP": MLPRegressor,
+    "XGB": XGBRegressor
 }
 
 def convert_param_space(param_space: ParamSpace) -> ConfigurationSpace:
