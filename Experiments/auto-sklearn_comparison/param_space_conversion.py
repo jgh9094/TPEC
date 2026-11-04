@@ -209,7 +209,7 @@ def convert_param_space(param_space: ParamSpace) -> ConfigurationSpace:
 
     return config_space
 
-def search_space(params_class: ModelParamsType, dataset_properties: dict | None,
+def search_space(params_class: ModelParamsType, dataset_properties: Optional[dict],
                  data_context: Optional[DataContext] = None) -> ConfigurationSpace:
     """
     Convert the project's parameter-definition class, use 'dataset_properties' to

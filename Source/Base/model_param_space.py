@@ -17,7 +17,7 @@ class FloatParam(TypedDict):
     log: bool  # if True, sample/optimize on a log scale (values must be strictly positive)
 
 class CatParam(TypedDict):
-    bounds: Tuple[str | None, ...]
+    bounds: Tuple[Optional[str], ...]
     type: Literal["cat"]
 
 class BoolParam(TypedDict):
@@ -141,7 +141,7 @@ class ModelParams(ABC):
             return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
         return float(rng.uniform(lo, hi))
 
-    def pick_categorical_parameter(self, choices: List | Tuple, rng: np.random.Generator):
+    def pick_categorical_parameter(self, choices: Union[List, Tuple], rng: np.random.Generator):
         """
         Picks a random value from a list of categorical choices.
 
