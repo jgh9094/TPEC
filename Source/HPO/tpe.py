@@ -31,12 +31,14 @@ class HPO_TPE(BaseTPE):
     the fitted "good" distribution) is intentionally absent -- the EA generates candidates and TPE
     only ranks them.
     """
-    def __init__(self, gamma: float):
+    def __init__(self, gamma: float, log_ratio_clip: Optional[float] = 5.0):
         """
         Parameters:
             gamma (float): Fraction of samples considered "good".
+            log_ratio_clip (Optional[float]): Cap on the (whole-genotype) log-ratio (see
+                ``BaseTPE``). Defaults to 5.0; ``None`` disables clipping.
         """
-        super().__init__(gamma)
+        super().__init__(gamma, log_ratio_clip=log_ratio_clip)
 
         # The space being modeled -- stashed at fit() so scoring needs no extra argument.
         self.param_space: Optional[ModelParams] = None

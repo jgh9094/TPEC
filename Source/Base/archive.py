@@ -279,6 +279,10 @@ class Archive(ABC):
         """Return True if a genome-identical individual has already been archived."""
         return self.compute_key(individual) in self._by_key
 
+    def has_key(self, key: str) -> bool:
+        """Return True if an entry with canonical key ``key`` has already been archived."""
+        return key in self._by_key
+
     def entries_for(self, individual: Individual) -> List[ArchiveEntry]:
         """Return all archived entries whose genome matches ``individual`` (may be empty)."""
         return self.get_by_key(self.compute_key(individual))

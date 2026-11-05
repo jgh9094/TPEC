@@ -123,7 +123,10 @@ registry). The pipeline space, operators, and TPE are **deferred** to `load_data
    every registered `ModelParams` with the `DataContext`, filter by the allow-list, add
    `passthrough` where permitted. Produces `self.operators` (live `ModelParams` objects, `None` for
    passthrough) and `self.pipeline_space` (`{node: {component: param_space}}` metadata for TPE).
-4. `self.tpe = CASH_TPE(gamma, pipeline_space)` and `self.eval_archive = CASHArchive()`.
+4. `self.tpe = CASH_TPE(gamma, pipeline_space, factorize_structure, joint_weight,
+   component_fallback)` (the last three come from the EA's `tpe_factorize_structure`,
+   `tpe_joint_weight`, `tpe_component_fallback` arguments; see [tpe.md](Source/CASH/tpe.md)) and
+   `self.eval_archive = CASHArchive()`.
 
 `_build_preprocessor` ([ea.py:1157](Source/CASH/ea.py#L1157)) — CASH only makes data numeric:
 one-hot the categoricals, **pass numerics through UNSCALED** (scaling is an evolved decision).
@@ -175,6 +178,23 @@ route through `_tpe_or_explore` ([ea.py:675](Source/CASH/ea.py#L675)):
   **nested genotypes directly** with `tpe.suggest_one` (no per-parameter re-encoding — CASH_TPE
   reads the nested dicts), keep the best; its score becomes `ei`; tag `construction = "tpe"`.
 - **Explore (otherwise):** one candidate; tag `construction = "random"`, `ei = -inf`.
+
+**Redundant-offspring filtering** (`dedup_offspring=True`, the default). A pipeline is redundant
+if it is already in the archive or was already produced earlier in the same generation
+(`self._generation_keys`, reset at the top of `generate_offspring`). Without filtering, copies of
+the parent are common among siblings and the TPE tends to rank them highly (they sit exactly on a
+good history point), so an offspring slot is spent re-reading an archived score.
+
+- Exploit: redundant siblings are dropped **before** ranking; the TPE picks among the new ones.
+- Explore: a redundant candidate is redrawn, up to `num_offspring` attempts in total (the same
+  candidate budget as a TPE roll), so the TPE and non-TPE paths follow the same rule.
+- Initial population: drawn without repeats.
+- If every attempt is redundant, one is kept anyway and counted in `self.redundant_offspring`
+  (printed at the end of `evolve`). So with filtering on,
+  `hard_eval_count == len(eval_archive) - redundant_offspring`.
+
+Helpers: `_genome_key` (same encoding as the archive key), `_is_novel`, `_claim`. Set
+`dedup_offspring=False` for the old behaviour.
 
 The candidate factories are what make CASH's variation structural + parametric:
 

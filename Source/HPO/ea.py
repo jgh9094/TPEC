@@ -387,12 +387,14 @@ class EA(BaseEA):
 
         # launch one Ray task per (pending individual, fold) so every fold evaluates in parallel
         ray_jobs = []
+        # fold index of each Ray task, so results can be stored in fold order (see below)
+        fold_of = {}
         for model_id, ind in enumerate(pending):
             # Seed is folded into eval_params (for stochastic estimators) so the Ray worker can
             # build the estimator straight from model_params without a separate random_state arg.
             eval_params = self.param_space.eval_parameters(ind.get_genotype(), random_state=self.seed)
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(self.ray_train_func.remote(
+            for fold_idx, (X_train, y_train, X_validate, y_validate) in enumerate(cv_splits):
+                ref = self.ray_train_func.remote(
                     X_train=X_train,
                     y_train=y_train,
                     X_validate=X_validate,
@@ -401,16 +403,24 @@ class EA(BaseEA):
                     id=model_id,
                     binary_class=self.binary_classification,
                     labels=self.labels
-                ))
+                )
+                ray_jobs.append(ref)
+                fold_of[ref] = fold_idx
 
         # accumulate fold performances per pending individual as results arrive; track whether
         # any fold errored so the individual can be flagged (error < 0.0 -> the fold returns 0.0/0.0)
-        pop_results = [{'train_acc': [], 'val_acc': [], 'error': False} for _ in pending]
+        # Each fold's score goes in its own slot (fold order), NOT appended in arrival order:
+        # ray.wait returns tasks in completion order, and floating-point addition is order-
+        # dependent, so averaging in arrival order could change a pipeline's mean in the last bit
+        # from run to run (enough to flip ties in selection/TPE splits and break reproducibility).
+        pop_results = [{'train_acc': [None] * num_folds, 'val_acc': [None] * num_folds,
+                        'folds_done': 0, 'error': False} for _ in pending]
 
         while len(ray_jobs) > 0:
             finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
             for done_id in finished:
                 model_id, train_acc, val_acc, error = ray.get(done_id)
+                fold_idx = fold_of.pop(done_id)
 
                 # a fold that failed to fit is not fatal here: it returns 0.0/0.0 (status -1.0) and
                 # flags the individual as errored. Any fold failure penalizes the whole individual
@@ -419,14 +429,15 @@ class EA(BaseEA):
                     pop_results[model_id]['error'] = True
                     print(f"Model {model_id} failed on a fold (fitness penalized to 0.0).", flush=True)
 
-                # track this fold's performance for the corresponding pipeline as it comes in
-                pop_results[model_id]['train_acc'].append(train_acc)
-                pop_results[model_id]['val_acc'].append(val_acc)
+                # store this fold's performance in its fold slot for the corresponding pipeline
+                pop_results[model_id]['train_acc'][fold_idx] = train_acc
+                pop_results[model_id]['val_acc'][fold_idx] = val_acc
+                pop_results[model_id]['folds_done'] += 1
 
                 # once all folds for this individual are in, finalize its CV performance. Any fold
                 # failure is a complete penalty (0.0/0.0), not an average that could still look
                 # competitive; only an all-fold success keeps its true mean CV performance.
-                if len(pop_results[model_id]['val_acc']) == num_folds:
+                if pop_results[model_id]['folds_done'] == num_folds:
                     errored = pop_results[model_id]['error']
                     # a failed fold is a complete penalty to the mode's worst score (self.error_penalty:
                     # 0.0 for classification AUC, a large negative for regression R^2); otherwise the

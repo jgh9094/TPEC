@@ -15,8 +15,9 @@
 #   * the genotype is a nested pipeline candidate (see Source/CASH/individual.py)
 #   * variation acts on both the component CHOICE at a node (structural) and that
 #     component's parameters (parametric);
-#   * TPE is the pipeline-aware CASH_TPE (Source/CASH/tpe.py), which models the joint
-#     architecture plus architecture-conditioned parameter evidence;
+#   * TPE is the pipeline-aware CASH_TPE (Source/CASH/tpe.py), which scores per-node component
+#     evidence, a joint-architecture correction, and architecture-conditioned parameter evidence
+#     (falling back to component-level parameter models pooled across architectures);
 #   * evaluation builds a real scikit-learn pipeline, skipping any node whose component is
 #     "passthrough".
 #
@@ -372,7 +373,11 @@ class EA(BaseEA):
                  predictors: Optional[List[str]] = None,
                  component_mut_prob: float = 0.1,
                  gamma: float = 0.0,
-                 classification: bool = True) -> None:
+                 classification: bool = True,
+                 tpe_factorize_structure: bool = True,
+                 tpe_joint_weight: float = 1.0,
+                 tpe_component_fallback: bool = True,
+                 dedup_offspring: bool = True) -> None:
         """
         Initializes the CASH EA.
 
@@ -404,6 +409,20 @@ class EA(BaseEA):
                 scored by ROC-AUC) or a regression task (False, scored by R^2). Selects the
                 predictor node's component registry (CLASSIFIERS vs. REGRESSORS) and the
                 CV/test scoring path. Defaults to True.
+            tpe_factorize_structure (bool): Forwarded to CASH_TPE ``factorize_structure`` -- add
+                per-node component log-ratios to the structure score. Defaults to True.
+            tpe_joint_weight (float): Forwarded to CASH_TPE ``joint_weight`` -- weight on the
+                joint-architecture log-ratio. Defaults to 1.0.
+            tpe_component_fallback (bool): Forwarded to CASH_TPE ``component_fallback`` -- fall
+                back to (node, component) parameter models pooled across architectures. Defaults
+                to True. ``tpe_factorize_structure=False, tpe_component_fallback=False`` (with
+                ``tpe_joint_weight=1.0``) reproduces the original joint-architecture-only TPE.
+            dedup_offspring (bool): Avoid producing pipelines that were already evaluated (in the
+                archive) or already produced earlier in the same generation. On a TPE roll, such
+                siblings are dropped before ranking; on a non-TPE roll, the candidate is redrawn
+                (up to ``num_offspring`` attempts); the initial population is drawn without
+                repeats. If every attempt is a repeat, one is kept anyway and counted in
+                ``self.redundant_offspring``. Defaults to True.
 
         Note:
             The per-step allow-lists restrict only the concrete estimators; the parameter-free
@@ -440,6 +459,16 @@ class EA(BaseEA):
         # TPE-related parameters
         self.tpe_prob = tpe_prob
         self.gamma = gamma
+        # CASH_TPE scoring options (see Source/CASH/tpe.md); the TPE itself is built in load_data_pd
+        self.tpe_factorize_structure = tpe_factorize_structure
+        self.tpe_joint_weight = tpe_joint_weight
+        self.tpe_component_fallback = tpe_component_fallback
+        # redundant-offspring filtering (see _is_novel / _tpe_or_explore)
+        self.dedup_offspring = dedup_offspring
+        # canonical keys of offspring already produced in the current generation (not yet archived)
+        self._generation_keys: set = set()
+        # offspring kept even though every attempt was a repeat (only possible with dedup on)
+        self.redundant_offspring = 0
         # whether the most recent TPE fit succeeded; refreshed once per generation by
         # generate_offspring and read by the variation operators to gate TPE-guided variation
         self.tpe_ready = False
@@ -512,7 +541,13 @@ class EA(BaseEA):
         self.scale_cols = list(range(n_numeric)) if has_protected_cols else None
 
         self._build_pipeline_space()
-        self.tpe = CASH_TPE(gamma=self.gamma, pipeline_space=self.pipeline_space)
+        self.tpe = CASH_TPE(
+            gamma=self.gamma,
+            pipeline_space=self.pipeline_space,
+            factorize_structure=self.tpe_factorize_structure,
+            joint_weight=self.tpe_joint_weight,
+            component_fallback=self.tpe_component_fallback,
+        )
 
         # provenance archive of every evaluated pipeline, saved by save_results
         self.eval_archive = CASHArchive()
@@ -693,14 +728,47 @@ class EA(BaseEA):
         """
         if self.tpe_ready and (self.rng.random() < self.tpe_prob):
             candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]
-            genotypes = [genotype for genotype, _ in candidate_offspring]
+            # drop redundant siblings (already evaluated / already produced this generation) before
+            # ranking; if every sibling is redundant, rank them all and count the repeat
+            pool = candidate_offspring
+            if self.dedup_offspring:
+                novel = [c for c in candidate_offspring if self._is_novel(c[0])]
+                if novel:
+                    pool = novel
+                else:
+                    self.redundant_offspring += 1
+            genotypes = [genotype for genotype, _ in pool]
             candidate_index = self.tpe.suggest_one(genotypes, self.rng)
             # the acquisition score of the chosen candidate is its expected improvement
             ei = float(self.tpe.score_candidates([genotypes[candidate_index]])[0])
-            genotype, operation = candidate_offspring[candidate_index]
+            genotype, operation = pool[candidate_index]
+            self._claim(genotype)
             return genotype, operation, TPE_CONSTRUCTION, ei
+
         genotype, operation = explore_candidate()
+        if self.dedup_offspring and not self._is_novel(genotype):
+            # redraw until a new pipeline appears (same attempt budget as a TPE roll)
+            for _ in range(self.num_offspring - 1):
+                genotype, operation = explore_candidate()
+                if self._is_novel(genotype):
+                    break
+            else:
+                self.redundant_offspring += 1
+        self._claim(genotype)
         return genotype, operation, RANDOM_CONSTRUCTION, float("-inf")
+
+    def _genome_key(self, genotype: Candidate) -> str:
+        """Canonical archive key of a raw genotype (same encoding as CASHArchive.compute_key)."""
+        return CASHArchive._canonical_key(genotype)
+
+    def _is_novel(self, genotype: Candidate) -> bool:
+        """True if ``genotype`` is neither archived nor already produced in this generation."""
+        key = self._genome_key(genotype)
+        return key not in self._generation_keys and not self.eval_archive.has_key(key)
+
+    def _claim(self, genotype: Candidate) -> None:
+        """Record that ``genotype`` was produced this generation, so later offspring avoid it."""
+        self._generation_keys.add(self._genome_key(genotype))
 
     # ------------------------------------------------------------------ core EA loop
 
@@ -757,6 +825,8 @@ class EA(BaseEA):
         self.total_time_minutes = (time.time() - start_time) / 60
 
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
+        if self.dedup_offspring:
+            print(f"Redundant offspring kept (no new pipeline found): {self.redundant_offspring}", flush=True)
         print(f"Total evolution time (mins): {self.total_time_minutes}", flush=True)
 
         # the best validation performance found across the whole run
@@ -794,8 +864,17 @@ class EA(BaseEA):
         assert len(self.population) == 0, "Population has already been initialized."
 
         self.population = []
+        seen = set()
         for _ in range(self.pop_size):
-            ind = CASHIndividual(self._random_candidate(self.rng))
+            genotype = self._random_candidate(self.rng)
+            if self.dedup_offspring:
+                # redraw repeats (random pipelines rarely collide; bounded so it can't loop forever)
+                for _ in range(self.num_offspring):
+                    if self._genome_key(genotype) not in seen:
+                        break
+                    genotype = self._random_candidate(self.rng)
+                seen.add(self._genome_key(genotype))
+            ind = CASHIndividual(genotype)
             # the initial population is drawn at random (no TPE guidance)
             ind.construction = RANDOM_CONSTRUCTION
             self.population.append(ind)
@@ -853,6 +932,9 @@ class EA(BaseEA):
             "The provenance archive must hold at least one evaluation for TPE-based variation."
 
         offspring = []
+        # offspring produced earlier in THIS generation are not archived yet; track them so
+        # redundant-offspring filtering also avoids in-generation repeats
+        self._generation_keys = set()
 
         # fit TPE on the current history; gate TPE-guided variation on a successful fit (the
         # pipeline-aware fit returns False when history cannot be split into good/bad groups).
@@ -1180,10 +1262,12 @@ class EA(BaseEA):
 
         # launch one Ray task per (pending candidate, fold) so every fold evaluates in parallel
         ray_jobs = []
+        # fold index of each Ray task, so results can be stored in fold order (see below)
+        fold_of = {}
         for model_id, ind in enumerate(pending):
             pipeline_steps = self._resolve_pipeline_steps(ind.get_genotype())
-            for X_train, y_train, X_validate, y_validate in cv_splits:
-                ray_jobs.append(cv_pipeline.remote(
+            for fold_idx, (X_train, y_train, X_validate, y_validate) in enumerate(cv_splits):
+                ref = cv_pipeline.remote(
                     X_train=X_train,
                     y_train=y_train,
                     X_validate=X_validate,
@@ -1193,16 +1277,24 @@ class EA(BaseEA):
                     id=model_id,
                     binary_class=self.binary_classification,
                     labels=self.labels,
-                ))
+                )
+                ray_jobs.append(ref)
+                fold_of[ref] = fold_idx
 
         # accumulate fold performances per pending pipeline as results arrive; track whether any
         # fold errored so the individual can be flagged when archived
-        pop_results = [{'train_acc': [], 'val_acc': [], 'error': False} for _ in pending]
+        # Each fold's score goes in its own slot (fold order), NOT appended in arrival order:
+        # ray.wait returns tasks in completion order, and floating-point addition is order-
+        # dependent, so averaging in arrival order could change a pipeline's mean in the last bit
+        # from run to run (enough to flip ties in selection/TPE splits and break reproducibility).
+        pop_results = [{'train_acc': [None] * num_folds, 'val_acc': [None] * num_folds,
+                        'folds_done': 0, 'error': False} for _ in pending]
 
         while len(ray_jobs) > 0:
             finished, ray_jobs = ray.wait(ray_jobs, num_returns=min(len(ray_jobs), self.cores))
             for done_id in finished:
                 model_id, train_acc, val_acc, error = ray.get(done_id)
+                fold_idx = fold_of.pop(done_id)
 
                 # A CASH pipeline can legitimately fail to fit on a fold when its evolved components
                 # are mutually incompatible (e.g. a VarianceThreshold that removes every feature, or
@@ -1213,14 +1305,15 @@ class EA(BaseEA):
                     pop_results[model_id]['error'] = True
                     print(f"Pipeline {model_id} failed on a fold (fitness penalized to 0.0).", flush=True)
 
-                # track this fold's performance for the corresponding pipeline as it comes in
-                pop_results[model_id]['train_acc'].append(train_acc)
-                pop_results[model_id]['val_acc'].append(val_acc)
+                # store this fold's performance in its fold slot for the corresponding pipeline
+                pop_results[model_id]['train_acc'][fold_idx] = train_acc
+                pop_results[model_id]['val_acc'][fold_idx] = val_acc
+                pop_results[model_id]['folds_done'] += 1
 
                 # once all folds for this pipeline are in, finalize its CV performance. Any fold
                 # failure is a complete penalty (0.0/0.0), not an average that could still look
                 # competitive; only an all-fold success keeps its true mean CV performance.
-                if len(pop_results[model_id]['val_acc']) == num_folds:
+                if pop_results[model_id]['folds_done'] == num_folds:
                     errored = pop_results[model_id]['error']
                     # Errored pipelines are penalized to the reliably-worst score so they never
                     # outrank a real evaluation. For classification (ROC-AUC in [0, 1]) that floor
