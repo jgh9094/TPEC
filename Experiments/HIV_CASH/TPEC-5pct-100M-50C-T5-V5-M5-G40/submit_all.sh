@@ -5,12 +5,12 @@
 # Placement determines scope: at Experiments/CASH/TPEC it submits the whole sweep
 # (3 budget x 4 strategy = 12 jobs); inside a *_Evals folder it submits only that budget's
 # 4 jobs (submit one budget at a time to avoid flooding the HPC).
-# Each .sb is itself a 63-task array (3 tasks x 21 seeds).
+# Each .sb is itself a 31-task array (1 task x 31 seeds).
 #
 # Usage:
 #   ./submit_all.sh             # submit everything
 #   ./submit_all.sh --dry-run   # list what would be submitted, submit nothing
-#   ./submit_all.sh 100_Evals   # only submit .sb files whose path matches "100_Evals"
+#   ./submit_all.sh 200_Evals   # only submit .sb files whose path matches "200_Evals"
 #
 # The optional final argument is a substring filter on the .sb path (e.g. a budget or
 # strategy), letting you submit a subset without editing files.

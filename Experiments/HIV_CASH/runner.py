@@ -14,13 +14,13 @@ import ray
 from pathlib import Path
 
 # components (get_model_type() names) the evolution may use at each pipeline node: every
-# component in Source/ML except PolynomialFeatures and MLP (too slow). "passthrough" is always
+# component in Source/ML except PolynomialFeatures (too slow). "passthrough" is always
 # available where the node allows it, so it is not listed.
 SCALERS = ['MinMaxScaler', 'RobustScaler', 'StandardScaler', 'MaxAbsScaler', 'Normalizer']
 TRANSFORMERS = ['KBinsDiscretizer', 'Binarizer', 'PCA', 'FastICA', 'FeatureAgglomeration',
                 'Nystroem', 'RBFSampler', 'QuantileTransformer', 'PowerTransformer']
 SELECTORS = ['SelectFwe', 'SelectPercentile', 'VarianceThreshold']
-CLASSIFIERS = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'XGB']
+CLASSIFIERS = ['RF', 'ET', 'KSVC', 'GB', 'KNN', 'MLP', 'XGB']
 
 
 def load_hiv_data(data_directory: Path, y_label: str):
