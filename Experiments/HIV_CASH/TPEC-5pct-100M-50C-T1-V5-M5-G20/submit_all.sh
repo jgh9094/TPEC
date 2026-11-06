@@ -5,7 +5,7 @@
 # Placement determines scope: at Experiments/CASH/TPEC it submits the whole sweep
 # (3 budget x 4 strategy = 12 jobs); inside a *_Evals folder it submits only that budget's
 # 4 jobs (submit one budget at a time to avoid flooding the HPC).
-# Each .sb is itself a 63-task array (3 tasks x 21 seeds).
+# Each .sb is itself a 31-task array (1 task x 31 seeds).
 #
 # Usage:
 #   ./submit_all.sh             # submit everything

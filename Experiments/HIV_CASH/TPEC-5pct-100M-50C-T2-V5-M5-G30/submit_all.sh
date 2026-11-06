@@ -10,7 +10,7 @@
 # Usage:
 #   ./submit_all.sh             # submit everything
 #   ./submit_all.sh --dry-run   # list what would be submitted, submit nothing
-#   ./submit_all.sh 200_Evals   # only submit .sb files whose path matches "200_Evals"
+#   ./submit_all.sh 100_Evals   # only submit .sb files whose path matches "100_Evals"
 #
 # The optional final argument is a substring filter on the .sb path (e.g. a budget or
 # strategy), letting you submit a subset without editing files.
