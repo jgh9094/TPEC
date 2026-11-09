@@ -14,7 +14,9 @@ only where the TPE is used. Conditions:
 
   * T2, TPE used: every (tpe_selection, tpe_offspring) in {0, 0.5, 1}^2 except (0, 0), times GAMMAS.
   * T2, EA:       tpe_selection = tpe_offspring = 0. The TPE is never fitted, so gamma cannot affect
-                  it, and it is generated ONCE (with gamma 0.0), not once per gamma.
+                  it, and it is generated ONCE, not once per gamma. Its .sb still passes
+                  EA_PLACEHOLDER_GAMMA because the CASH EA always constructs a CASH_TPE, whose
+                  constructor requires gamma in (0, 1).
   * T1 control:   tournament size 1, where tpe_selection cannot change the winner, so only
                   tpe_selection = 0 is run; tpe_offspring in {0.5, 1} times GAMMAS, plus one EA run.
 
@@ -59,6 +61,9 @@ COMPONENT_MUT_PROB = 0.25
 NUM_OFFSPRING = 10
 # gamma: fraction of the history treated as "good" by the TPE; used only where the TPE is used
 GAMMAS = (0.20, 0.30, 0.50)
+# gamma written into the EA .sb files. Never used (the TPE is never fitted with both knobs at 0), but
+# CASH_TPE is still constructed in load_data_pd and asserts 0 < gamma < 1. Same value the old sweeps used.
+EA_PLACEHOLDER_GAMMA = 0.30
 # tpe_offspring and tpe_selection levels crossed in the T2 design
 TPE_LEVELS = (0.0, 0.5, 1.0)
 # tournament sizes: 2 is the main design, 1 is the control (no parent tournament at all)
@@ -188,8 +193,8 @@ def generate(output_root: str = TPEC_DIR) -> int:
             tpe_offspring=tpe_offspring,
             tournament_size=tournament,
             num_offspring=NUM_OFFSPRING,
-            # EA conditions pass gamma 0.0: it is unused there (the TPE is never fitted)
-            gamma=0.0 if gamma is None else gamma,
+            # EA conditions pass a placeholder gamma: unused (the TPE is never fitted), but it must be valid
+            gamma=EA_PLACEHOLDER_GAMMA if gamma is None else gamma,
             data_directory=DATA_DIRECTORY,
             task_id=TASK_ID,
             results_root=RESULTS_ROOT,
