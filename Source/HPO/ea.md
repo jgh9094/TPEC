@@ -84,9 +84,12 @@ These functions receive already-preprocessed fold arrays — the preprocessing h
 
 `EA.__init__` ([ea.py:73](Source/HPO/ea.py#L73)) validates the `model` token against the
 task-appropriate list (the kernel-SVM token is mode-specific: `'KSVC'` classification vs `'SVR'`
-regression) and stores the TPE knobs (`tpe_prob`, `gamma`, `num_offspring`), tournament size, and
-the `error_penalty` (`0.0` for AUC, `-inf` for R²). The `param_space` and archive are **deferred**
-because they need the loaded data.
+regression) and stores the TPE knobs (`tpe_offspring`, `gamma`, `num_offspring`), tournament size, and
+the `error_penalty` (`0.0` for AUC, `-inf` for R²). `tpe_offspring` is the probability an offspring is
+chosen by the TPE from `num_offspring` candidate siblings.
+`checkpoint_every_generation` (default `True`) turns on the per-generation test checkpoints (see
+[per-generation checkpoints](#per-generation-test-checkpoints)). The `param_space` and archive are
+**deferred** because they need the loaded data.
 
 `load_data_pd` ([ea.py:173](Source/HPO/ea.py#L173)) calls the base loader, then:
 
@@ -112,17 +115,21 @@ base preprocessor must fully numericize *and* scale: `StandardScaler` on numeric
 3. **Record** — `record_history(evaluated, generation=-1)` ([ea.py:628](Source/HPO/ea.py#L628))
    adds every individual to `eval_archive` and writes back `archive_id`.
 4. **Prune + track** — `_drop_errored` removes errored individuals from the breeding pool (they
-   stay archived); `update_best_seen` advances `best_perf`.
+   stay archived); `update_best_seen` advances `best_perf`; then `_checkpoint(-1)` records the test
+   checkpoint for the initial population.
 5. **Per generation** (`g` in `range(gens)`):
    - `variation_order(pop_size, crossover_prob)` → per-offspring `'m'`/`'c'` operators + parent
      count.
    - `parent_selection(...)` ([ea.py:336](Source/HPO/ea.py#L336)) — tournament selection over
      validation performance, tournament size clamped to the (possibly pruned) pool.
    - `generate_offspring(...)` ([ea.py:537](Source/HPO/ea.py#L537)) — fits TPE from the archive
-     (if `tpe_prob > 0`) and calls `mutate`/`crossover` per the variation order.
-   - `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen`.
-6. **Finish** — take the held best via `_select_best`, run `model_test_evaluation`, store
-   `best_result` (train/val/test performance plus complexity).
+     (if `tpe_offspring > 0`) and calls `mutate`/`crossover` per the variation order.
+   - `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen` →
+     `_checkpoint(g)`.
+6. **Finish** — `total_time_minutes` excludes checkpoint time. The held best comes from `_select_best`.
+   Its train/test scores come from the last checkpoint row, so the best is not refit a second time.
+   If checkpoints are off, or that refit failed, `model_test_evaluation` runs as before. The result is
+   stored as `best_result` (train/val/test performance plus complexity).
 
 ### `evaluation()` — dedup, dispatch, finalize
 
@@ -158,7 +165,7 @@ self.param_space, self.rng)`) then dispatches to:
 Both route through `_tpe_or_explore` ([ea.py:872](Source/HPO/ea.py#L872)), the shared
 explore/exploit switch:
 
-- **With probability `tpe_prob` (exploit):** generate `num_offspring` candidates via a **small
+- **With probability `tpe_offspring` (exploit):** generate `num_offspring` candidates via a **small
   local shift** (`mutate_parameters_shift`, variance `mut_var`), encode each with
   `param_space.tpe_parameters`, and keep the one `tpe.suggest_one` ranks best. Its acquisition
   score becomes the offspring's `ei`; tagged `construction = "tpe"`.
@@ -195,7 +202,21 @@ base preprocessor is not counted.
 `save_results` ([ea.py:1050](Source/HPO/ea.py#L1050)) writes `best_results.json` (including
 `complexity`, `best_eval` = the best entry's 1-based position among all candidates considered, and
 `best_generation` = the generation that produced it, -1 for the initial population) and calls
-`save_archive` to dump `eval_archive.to_records()` as `archive.json`.
+`save_archive` to dump `eval_archive.to_records()` as `archive.json`. It also writes `checkpoints.csv` and
+`checkpoint_runtime_minutes.txt` when checkpoints exist.
+
+### Per-generation test checkpoints
+
+With `checkpoint_every_generation` on (the default), `BaseEA._checkpoint`
+([Source/Base/base_ea.py](Source/Base/base_ea.py)) refits the best-so-far model after the initial
+population and after every generation, and writes one row to `checkpoints.csv`. The columns and rules are
+the same as in [CASH's checkpoint section](Source/CASH/ea.md#per-generation-test-checkpoints), except
+that HPO has no TPE-selection columns (`tpe_ready`, `tpe_selection_tournaments`, `fitness_tournaments`).
+
+In short: the search never reads the checkpoint scores (`Test/test_checkpoints.py` checks this); the
+model is refit only when the best entry changes; a failed refit is recorded in `refit_error` and never
+raised; and a run with budget N has the same rows as the first rows of a longer run with the same seed,
+so the row with `evaluations == N` is the state an N-budget run would have reached.
 
 ---
 

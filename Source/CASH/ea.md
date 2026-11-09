@@ -112,6 +112,12 @@ ones: `component_mut_prob` (probability a node's *component* is resampled during
 per-step allow-lists (`scalers`/`transformers`/`selectors`/`predictors`; empty = use the full
 registry). The pipeline space, operators, and TPE are **deferred** to `load_data_pd`.
 
+The TPE and checkpoint arguments: `tpe_offspring` (probability an offspring is chosen by the TPE from
+`num_offspring` candidate siblings), `tpe_selection` (default 0.0; probability
+a parent tournament compares TPE scores instead of fitness; see
+[parent selection](#parent-selection-and-the-two-tpe-knobs)), and `checkpoint_every_generation`
+(default `True`; see [per-generation checkpoints](#per-generation-test-checkpoints)).
+
 `load_data_pd` ([ea.py:471](Source/CASH/ea.py#L471)) calls the base loader, then:
 
 1. Builds a `DataContext` (with `n_samples` capped at the smallest CV fold).
@@ -134,17 +140,26 @@ Numerics are listed first so the scaler can target them by index.
 
 ### The `evolve()` loop
 
-`evolve(gens)` ([ea.py:709](Source/CASH/ea.py#L709)) mirrors HPO's loop:
+`evolve(gens)` ([ea.py:709](Source/CASH/ea.py#L709)) mirrors HPO's loop, with two additions: the TPE
+is fitted once per generation before parent selection, and a test checkpoint is recorded after the
+initial population and after every generation (see [per-generation checkpoints](#per-generation-test-checkpoints)).
 
 1. `initialize_population()` ([ea.py:791](Source/CASH/ea.py#L791)) — `pop_size` random pipelines
    via `_random_candidate` (one random component + sampled params per node), tagged
    `construction = "random"`.
-2. `evaluation(...)` → `record_history(generation=-1)` → `_drop_errored` → `update_best_seen`.
-3. Per generation `g`: `variation_order` → `parent_selection` (tournament over validation) →
-   `generate_offspring` → `evaluation` → `record_history(generation=g)` → `_drop_errored` →
-   `update_best_seen`.
-4. Finish: `_select_best` → `model_test_evaluation` → `best_result` (train/val/test performance
-   plus complexity).
+2. `evaluation(...)` → `record_history(generation=-1)` → `_drop_errored` → `update_best_seen` →
+   `_checkpoint(-1)`.
+3. Per generation `g`:
+   - `_fit_tpe()` — resets the per-generation tournament counters and, if `tpe_offspring > 0` or
+     `tpe_selection > 0`, fits the TPE on the archive (`tpe_ready` records whether the fit succeeded).
+   - `variation_order` → `parent_selection` (tournaments; see
+     [the two TPE knobs](#parent-selection-and-the-two-tpe-knobs)) → `generate_offspring` →
+     `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen` →
+     `_checkpoint(g)`.
+4. Finish: `total_time_minutes` is recorded **without** checkpoint time. The held best's result comes
+   from `_select_best`, and its train/test scores come from the last checkpoint row, so the best is not
+   refit a second time. If checkpoints are off, or that refit failed, `model_test_evaluation` runs as
+   before. The result is stored as `best_result` (train/val/test performance plus complexity).
 
 ### `evaluation()` — dedup, dispatch, finalize
 
@@ -165,18 +180,19 @@ Numerics are listed first so the scaler can target them by index.
 
 ### Offspring construction — structural + parametric
 
-`generate_offspring` ([ea.py:832](Source/CASH/ea.py#L832)) fits TPE once per generation:
-`self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)`. Unlike HPO, the pipeline-aware
-`fit` **returns a bool** — `tpe_ready` gates whether TPE guidance is used this generation (it's
-`False` when history can't be split into good/bad groups). Then per offspring it calls `mutate` or
-`crossover`.
+The TPE is fitted once per generation by `_fit_tpe`, at the start of the generation and before parent
+selection (`self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)`). `generate_offspring`
+([ea.py:832](Source/CASH/ea.py#L832)) no longer fits it. Unlike HPO, the pipeline-aware `fit`
+**returns a bool**: `tpe_ready` gates whether TPE guidance is used this generation (it's `False` when
+history can't be split into good/bad groups). Then per offspring it calls `mutate` or `crossover`.
 
 `mutate` ([ea.py:882](Source/CASH/ea.py#L882)) and `crossover` ([ea.py:908](Source/CASH/ea.py#L908))
 route through `_tpe_or_explore` ([ea.py:675](Source/CASH/ea.py#L675)):
 
-- **Exploit (prob `tpe_prob`, and `tpe_ready`):** generate `num_offspring` candidates, score the
+- **Exploit (prob `tpe_offspring`, and `tpe_ready`):** generate `num_offspring` candidates, score the
   **nested genotypes directly** with `tpe.suggest_one` (no per-parameter re-encoding — CASH_TPE
   reads the nested dicts), keep the best; its score becomes `ei`; tag `construction = "tpe"`.
+  With `tpe_offspring == 0` the roll is skipped entirely, so no random draw is made.
 - **Explore (otherwise):** one candidate; tag `construction = "random"`, `ei = -inf`.
 
 **Redundant-offspring filtering** (`dedup_offspring=True`, the default). A pipeline is redundant
@@ -215,6 +231,45 @@ The candidate factories are what make CASH's variation structural + parametric:
 one `CASHIndividual` per unique genome key, each with **negated** validation performance (TPE
 minimizes; the EA maximizes). Errored pipelines negate into the "bad" group.
 
+### Parent selection and the two TPE knobs
+
+Two knobs let the TPE act on the population at different points. They are independent, and both
+default to 0.
+
+- **`tpe_offspring`** (also in HPO): the probability an offspring is chosen by the TPE from
+  `num_offspring` candidate siblings (see *Offspring construction*).
+- **`tpe_selection`** (CASH only): the probability that a **parent tournament** compares its
+  candidates by their TPE score (`CASH_TPE.score_candidates`, higher is better) instead of by
+  validation fitness. It is drawn independently for each tournament.
+
+`parent_selection` computes the comparison keys once per call: validation fitness always, and TPE
+scores only when `tpe_selection > 0` and `tpe_ready`. Then, for each of the `num_parents` tournaments,
+it makes these draws in this order:
+
+1. **Key roll**, only if the TPE key can change the winner (`use_tpe_scores and k > 1`):
+   `by_tpe = rng.random() < tpe_selection`. Otherwise no draw is made.
+2. `rng.choice` of the `k = min(tournament_size, len(population))` competitors, as before.
+3. The winner is the highest key among them. Ties are broken by `rng.choice`, as before.
+
+What follows from this:
+
+- With `tpe_selection = 0`, when the TPE is not ready, or for a size-1 tournament, no roll is drawn,
+  so the random stream is identical to the code before the knob existed. The reference fixture
+  `Test/fixtures/reference_cash_archive.json` checks this exactly (`Test/test_cash_tpe_selection.py`).
+- If `tpe_selection > 0` but `tpe_ready` is False (history too small to fit), every tournament uses
+  fitness.
+- A size-1 tournament always uses fitness, even at `tpe_selection = 1`, because one candidate wins
+  whatever the key.
+- The archive schema is unchanged. Each generation's tournaments are counted:
+  `tpe_selection_tournaments` (decided by TPE score) and `fitness_tournaments` (decided by fitness,
+  including all size-1 tournaments). The counters reset at the start of each generation and go into
+  `checkpoints.csv`.
+
+The TPE is fitted by `_fit_tpe` before parent selection, because parent selection may now need it.
+`CASH_TPE.fit` consumes no random draws (every KDE it builds has a bandwidth floor, so the jitter
+path that uses `rng` never runs). Fitting earlier than the old per-offspring point therefore leaves
+the search unchanged.
+
 ### Selection and final test
 
 `update_best_seen` ([ea.py:1026](Source/CASH/ea.py#L1026)), `_select_best`
@@ -227,7 +282,51 @@ numeric-aware), fits, and scores train + test. It also returns the fitted Pipeli
 predictor's parameter count, plus 1 per transformer/scaler step and 0 per selector; the fixed base
 preprocessor is not counted. `best_results.json` additionally records the winning `architecture`
 (via `get_architecture()`), `complexity`, `best_eval`, and `best_generation` (as in HPO).
-`save_results` ([ea.py:1402](Source/CASH/ea.py#L1402)) writes `best_results.json` and `archive.json`.
+`save_results` ([ea.py:1402](Source/CASH/ea.py#L1402)) writes `best_results.json` and `archive.json`,
+plus `checkpoints.csv` and `checkpoint_runtime_minutes.txt` when checkpoints exist.
+
+### Per-generation test checkpoints
+
+With `checkpoint_every_generation` on (the default), `BaseEA._checkpoint`
+([Source/Base/base_ea.py](Source/Base/base_ea.py)) refits the best-so-far pipeline after the initial
+population and after every generation, and writes one row to `checkpoints.csv`. Columns, in order:
+
+| Column | Meaning |
+|---|---|
+| `generation` | −1 for the initial population, then 0 … gens − 1 |
+| `evaluations` | `len(eval_archive)`: candidates considered, which equals `pop_size * (generation + 2)` |
+| `hard_evaluations` | distinct pipelines evaluated so far |
+| `best_id`, `best_eval` | archive id of the best entry, and `best_id + 1` (as in `best_results.json`) |
+| `best_generation` | generation that produced the best entry |
+| `train_performance`, `validation_performance`, `test_performance` | the best's train AUC (refit on the full training set), its CV validation score, and its test AUC |
+| `complexity` | `calculate_model_complexity` of the refit pipeline |
+| `refit` | True if the pipeline was refit at this checkpoint |
+| `refit_error` | empty unless the refit failed |
+| `search_minutes` | search time so far, **excluding** checkpoint time |
+| `tpe_ready`, `tpe_selection_tournaments`, `fitness_tournaments` | this generation's TPE fit result and tournament counts (CASH only; False and 0 at generation −1) |
+
+Rules:
+
+- **The search never reads these numbers.** Nothing in the search reads `self.checkpoints` or the
+  cached scores; test scores are for reporting only. `Test/test_checkpoints.py` replaces the test
+  evaluation with random numbers from a separate generator and confirms the archive is unchanged.
+- **Refit only when the best changes.** The best is refit on the full training set only when its
+  archive entry differs from the last checkpoint's. Otherwise the cached scores are reused, which is
+  valid because a fit is deterministic for a fixed genome. `refit` is True exactly on those rows.
+- **A failed refit never ends the run.** It is recorded (NaN train and test, `complexity = -1`,
+  `refit_error = "<exception>"`) and cached for that best entry, so it is not retried every
+  generation. The end of `evolve` retries the refit once, so a real failure still raises, as it did
+  before checkpoints existed.
+- **Budget prefix.** A run with budget N and the same seed produces the same rows as the first rows
+  of a longer run, in every column except `search_minutes`. The row whose `evaluations` equals N is
+  therefore the state an N-budget run would have reached. One max-budget run replaces the separate
+  budget runs.
+- **Timing.** Checkpoint time is measured and kept out of `total_runtime_minutes.txt` and
+  `search_minutes`. It is written to `checkpoint_runtime_minutes.txt`.
+- **Final result.** With checkpoints on, `best_result` is read from the last row, which holds the same
+  best entry. `best_results.json` therefore has the same content as before.
+- A checkpoint is skipped (no row is written) until some pipeline has a finite validation score. This
+  only happens for regression, when every initial individual errors (R² = −inf).
 
 ---
 
@@ -244,10 +343,16 @@ evaluation ── _resolve_duplicates ◀── CASHArchive.compute_key / entrie
         ▼
 record_history ─▶ CASHArchive.add(...) ─▶ writes archive_id back onto each CASHIndividual
         │
-generate_offspring ── tpe_ready = tpe.fit(_tpe_samples() from archive) ─▶ mutate / crossover
+_fit_tpe (start of generation) ── tpe_ready = tpe.fit(_tpe_samples() from archive)
+        │
+parent_selection ── per tournament: validation fitness, or TPE score (tpe_selection)
+        │
+generate_offspring ── mutate / crossover ── TPE-chosen offspring (tpe_offspring)
         │                 └─ structural (component) + parametric (shift/random) variation
         ▼
-_select_best ◀── CASHArchive.best(rng) ─▶ model_test_evaluation ─▶ best_results.json + archive.json
+_checkpoint(g) ── refit best only if it changed ─▶ checkpoints.csv (reporting only, never read by search)
+        │
+_select_best ◀── CASHArchive.best(rng) ─▶ final result from last checkpoint ─▶ best_results.json + archive.json
 ```
 
 The recurring pattern: **the archive remembers every full pipeline, dedup avoids re-fitting them,

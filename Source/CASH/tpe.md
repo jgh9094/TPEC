@@ -269,14 +269,20 @@ What the new terms change:
 
 ## How the EA drives it
 
-Inside `CASH.EA.generate_offspring` ([ea.py:854](Source/CASH/ea.py#L854)) →
-`_tpe_or_explore` ([ea.py:692](Source/CASH/ea.py#L692)); see [ea.md](Source/CASH/ea.md):
+The TPE is fitted by `CASH.EA._fit_tpe` at the start of each generation, before parent selection
+(`parent_selection` and `generate_offspring` both use the result). Per-offspring decisions are made in
+`_tpe_or_explore`. See [ea.md](Source/CASH/ea.md):
 
 ```python
-# once per generation, from the deduplicated archive history (negated val performance):
+# once per generation, before parent selection, from the deduplicated archive history
+# (negated val performance). Skipped when tpe_offspring = tpe_selection = 0:
 self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)   # bool gate
 
-# per TPE-guided offspring (only when tpe_ready, with probability tpe_prob):
+# parent selection, per tournament (only when tpe_ready and tpe_selection > 0):
+tpe_scores = self.tpe.score_candidates([p.get_genotype() for p in population])   # higher = better
+# a tournament is decided by tpe_scores with probability tpe_selection, else by validation fitness
+
+# per TPE-guided offspring (only when tpe_ready, with probability tpe_offspring):
 candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]  # same operator as non-TPE
 genotypes = [g for g, _ in candidate_offspring]
 idx = self.tpe.suggest_one(genotypes, self.rng)   # nested dicts scored directly
@@ -288,6 +294,9 @@ Key points specific to CASH (contrast with HPO):
 - **Three-part score.** Per-node structure + joint structure + per-node parameter evidence with a
   pooled fallback, versus HPO's single flat group.
 - **`fit` returns a `bool`.** The EA gates TPE use on `tpe_ready`; HPO's `fit` returns `None`.
+- **One fit, two consumers.** The same fitted model ranks offspring (`suggest_one`, `tpe_offspring`)
+  and, when `tpe_selection > 0`, ranks parents through `score_candidates`. Scoring only reads the
+  fitted model and makes no random draws, so the fit is shared without changing any other draw.
 - **No `tpe_parameters` encoding.** `score_candidates` reads the nested `Candidate` dicts directly;
   HPO re-encodes each flat genotype through `param_space.tpe_parameters` first.
 - **Negated objective, ranking only.** `_tpe_samples` ([ea.py:982](Source/CASH/ea.py#L982))

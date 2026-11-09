@@ -5,6 +5,9 @@
 #
 ##########################################################################################
 
+import csv
+import os
+import time
 import numpy as np
 import pandas as pd
 import ray
@@ -12,10 +15,18 @@ import sklearn as skl
 from abc import ABC, abstractmethod
 
 from typeguard import typechecked
-from typing import List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from sklearn.compose import ColumnTransformer
 
 from Source.Base.individual import Individual
+
+# Columns of checkpoints.csv that every EA writes (see BaseEA._checkpoint). In this order.
+# CASH appends its TPE-selection columns (see CASH EA.checkpoint_columns).
+CHECKPOINT_COLUMNS = [
+    "generation", "evaluations", "hard_evaluations", "best_id", "best_eval", "best_generation",
+    "train_performance", "validation_performance", "test_performance", "complexity",
+    "refit", "refit_error", "search_minutes",
+]
 
 
 @typechecked
@@ -31,7 +42,8 @@ class BaseEA(ABC):
                  cores: int,
                  mut_prob: float,
                  crossover_prob: float,
-                 classification: bool) -> None:
+                 classification: bool,
+                 checkpoint_every_generation: bool = True) -> None:
         """
         Initializes the base EA class with common parameters.
 
@@ -50,6 +62,10 @@ class BaseEA(ABC):
                 ``labels``/``binary_classification`` as None. For regression the target ``y`` is
                 used as-is -- callers must pre-scale/transform it as needed (some estimators, e.g.
                 an MLPRegressor with solver='sgd', diverge on large-magnitude unscaled targets).
+            checkpoint_every_generation (bool): If True, after the initial population and after
+                every generation, refit the best-so-far model and record its train/validation/test
+                performance in ``checkpoints.csv`` (see ``_checkpoint``). The search never reads
+                these scores, so turning checkpoints on or off does not change the search.
         """
         # quick sanity checks
         assert seed >= 0, "Seed must be a non-negative integer."
@@ -89,6 +105,17 @@ class BaseEA(ABC):
         # number of cross-validation folds; unset until load_data_pd assigns it (defaults to 5
         # there). Kept None here so load_data_pd can assert it has not already been set.
         self.n_folds: Optional[int] = None
+
+        # per-generation test checkpoints (see _checkpoint). Reporting only: the search never reads them.
+        self.checkpoint_every_generation = checkpoint_every_generation
+        self.checkpoints: List[Dict[str, Any]] = []
+        # wall-clock minutes spent inside checkpoints; excluded from total_time_minutes
+        self.checkpoint_minutes = 0.0
+        # when evolve() started, so search_minutes can be measured net of checkpoint time
+        self._search_clock_start: Optional[float] = None
+        # best entry id last refit, and its cached (train, test, complexity, refit_error)
+        self._last_checkpoint_entry_id: Optional[int] = None
+        self._last_checkpoint_scores: Optional[Tuple[float, float, int, str]] = None
 
         return
 
@@ -345,6 +372,152 @@ class BaseEA(ABC):
             the fitted model's ``calculate_model_complexity`` score (Source/ML/complexity.py).
         """
         pass
+
+    @abstractmethod
+    def _select_best(self) -> Tuple[Individual, float]:
+        """
+        Return the held best-so-far individual (rebuilt from the archive entry ``best_entry``) and
+        its validation score. Makes no random draws, so reading it never changes the search.
+        Must be implemented by derived classes.
+        """
+        pass
+
+    def checkpoint_columns(self) -> List[str]:
+        """
+        Column order of ``checkpoints.csv``. Derived classes append their own columns.
+
+        Returns:
+            List[str]: The column names, in file order.
+        """
+        return list(CHECKPOINT_COLUMNS)
+
+    def _checkpoint_extra_fields(self, generation: int) -> Dict[str, Any]:
+        """
+        Hook for derived classes: extra fields for this generation's checkpoint row. Default: none.
+
+        Args:
+            generation (int): Generation just completed (-1 for the initial population).
+
+        Returns:
+            Dict[str, Any]: Extra column values, keyed by the names from ``checkpoint_columns``.
+        """
+        return {}
+
+    def _checkpoint(self, generation: int) -> None:
+        """
+        Record the best-so-far model's train, validation and test performance as one checkpoint row.
+
+        Why: a single run then yields every smaller evaluation budget. Each row is the search state at
+        the end of ``generation`` (-1 = initial population), so a shorter run is a prefix of a longer one.
+
+        Test scores are REPORTING ONLY. Nothing inside the search may read ``self.checkpoints`` or the
+        cached scores below. The search reads the archive and the TPE, never test data.
+
+        The best model is refit on the full training set only when the best entry changed since the
+        last checkpoint; otherwise the cached scores are reused. A refit failure is recorded in the row
+        (NaN scores plus ``refit_error``) and is never raised, so a checkpoint cannot end the run. The
+        failure is cached for that best entry rather than retried every generation; the end of
+        ``evolve`` retries it once.
+
+        Checkpoint time is measured and excluded from ``total_time_minutes`` and from ``search_minutes``,
+        so runtimes stay comparable with runs made before checkpointing existed. Makes no random draws.
+
+        Args:
+            generation (int): Generation just completed (-1 for the initial population).
+        """
+        assert self._search_clock_start is not None, "evolve() must start the search clock before checkpointing."
+        checkpoint_start = time.time()
+
+        # Nothing to report until some pipeline has a finite validation score. Only possible for
+        # regression, when every initial individual errored (R^2 = -inf). Skip the row rather than fail.
+        if self.best_entry is None:
+            print(f"Checkpoint (Gen {generation}) skipped: no best entry yet.", flush=True)
+            self.checkpoint_minutes += (time.time() - checkpoint_start) / 60
+            return
+
+        best_individual, best_val = self._select_best()
+        best_id = self.best_entry.id
+        search_minutes = (checkpoint_start - self._search_clock_start) / 60 - self.checkpoint_minutes
+
+        refit = best_id != self._last_checkpoint_entry_id
+        if refit:
+            try:
+                train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+                error = ""
+            except Exception as exc:  # a checkpoint must never end the search
+                error = f"{type(exc).__name__}: {exc}"
+                print(f"WARNING: checkpoint refit failed at generation {generation}: {error}", flush=True)
+                train_score, test_score, complexity = float("nan"), float("nan"), -1
+            self._last_checkpoint_entry_id = best_id
+            self._last_checkpoint_scores = (train_score, test_score, complexity, error)
+        else:
+            train_score, test_score, complexity, error = self._last_checkpoint_scores
+
+        row: Dict[str, Any] = {
+            "generation": generation,
+            "evaluations": len(self.eval_archive),
+            "hard_evaluations": self.hard_eval_count,
+            "best_id": best_id,
+            "best_eval": best_id + 1,  # same convention as best_results.json
+            "best_generation": self.best_entry.generation,
+            "train_performance": train_score,
+            "validation_performance": best_val,
+            "test_performance": test_score,
+            "complexity": complexity,
+            "refit": refit,
+            "refit_error": error,
+            "search_minutes": search_minutes,
+        }
+        row.update(self._checkpoint_extra_fields(generation))
+        self.checkpoints.append(row)
+
+        # charge this checkpoint's own time to checkpoint_minutes, so total runtime excludes it
+        self.checkpoint_minutes += (time.time() - checkpoint_start) / 60
+
+    def _final_scores_from_checkpoint(self) -> Optional[Tuple[float, float, int]]:
+        """
+        Train, test and complexity of the held best, taken from the last checkpoint row, so the end
+        of ``evolve`` does not refit the same model a second time.
+
+        Returns None when the caller must refit (the old path): checkpointing is off, there is no row,
+        the best entry has moved on since the row, or the row's refit failed (the end of the run retries it,
+        so a real failure still raises here as it always has).
+
+        Returns:
+            Optional[Tuple[float, float, int]]: (train, test, complexity), or None.
+        """
+        if not self.checkpoint_every_generation or not self.checkpoints or self.best_entry is None:
+            return None
+        last = self.checkpoints[-1]
+        if last["refit_error"] or last["best_id"] != self.best_entry.id:
+            return None
+        return float(last["train_performance"]), float(last["test_performance"]), int(last["complexity"])
+
+    def save_checkpoints(self, save_dir: str) -> None:
+        """
+        Write ``checkpoints.csv`` (one row per checkpoint, columns in ``checkpoint_columns()`` order)
+        and ``checkpoint_runtime_minutes.txt``. Writes nothing if no checkpoint was recorded.
+
+        Args:
+            save_dir (str): Directory to write the files into.
+        """
+        if not self.checkpoints:
+            return
+
+        os.makedirs(save_dir, exist_ok=True)
+        columns = self.checkpoint_columns()
+        csv_path = os.path.join(save_dir, "checkpoints.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(self.checkpoints)
+        print(f"Checkpoints ({len(self.checkpoints)} rows) saved to: {csv_path}", flush=True)
+
+        runtime_path = os.path.join(save_dir, "checkpoint_runtime_minutes.txt")
+        with open(runtime_path, "w") as f:
+            f.write(f"{self.checkpoint_minutes}")
+
+        return
 
     @abstractmethod
     def evolve(self, gens: int) -> None:

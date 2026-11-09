@@ -1,0 +1,51 @@
+#!/bin/bash -l
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --time=12:00:00
+#SBATCH --mem=200G
+#SBATCH --job-name=t2g20s100o50
+#SBATCH -p defq,moore,preemptable
+#SBATCH --array=1-31
+
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate tpe-ea
+
+# standard parameters used for all experiments
+TRAIN_P=0.70
+GENS=19
+POP_SIZE=20
+CORES=$SLURM_CPUS_PER_TASK
+MUT_PROB=0.5
+CROSSOVER_PROB=0.5
+COMPONENT_MUT_PROB=0.25
+TPE_SELECTION=1.0
+TPE_OFFSPRING=0.5
+TOURNAMENT_SIZE=2
+NUM_OFFSPRING=10
+GAMMA=0.20
+DATA_DIRECTORY=/home/hernandezj45/Repos/TPEC/Data/HIV/ecoxai_dataset_5pct_no_PHI.csv
+TASK_ID=virologic_failure
+
+# one array task per seed (seeds 0-30)
+SEED=$(( SLURM_ARRAY_TASK_ID - 1 ))
+# output directory for this condition, task and seed
+OUTPUT_DIRECTORY=/home/hernandezj45/Repos/TPEC/All_Results/Results_HIV_5pct_TwoKnob_Pop20/CASH/T2/G20/S100_O50/Task_${TASK_ID}/Seed_${SEED}/
+
+python /home/hernandezj45/Repos/TPEC/Experiments/HIV_CASH/runner.py \
+    --seed $SEED \
+    --y_label $TASK_ID \
+    --data_path $DATA_DIRECTORY \
+    --train_p $TRAIN_P \
+    --output_directory $OUTPUT_DIRECTORY \
+    --gens $GENS \
+    --pop_size $POP_SIZE \
+    --cores $CORES \
+    --mut_prob $MUT_PROB \
+    --crossover_prob $CROSSOVER_PROB \
+    --component_mut_prob $COMPONENT_MUT_PROB \
+    --tpe_selection $TPE_SELECTION \
+    --tpe_offspring $TPE_OFFSPRING \
+    --tournament_size $TOURNAMENT_SIZE \
+    --num_offspring $NUM_OFFSPRING \
+    --gamma $GAMMA

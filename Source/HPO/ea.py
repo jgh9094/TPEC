@@ -79,12 +79,13 @@ class EA(BaseEA):
                  cores: int,
                  mut_prob: float,
                  model: str,  # classification: ['RF','ET','KSVC','GB','KNN','MLP','XGB']; regression: ['RF','ET','SVR','GB','KNN','MLP','XGB']
-                 tpe_prob: float,
+                 tpe_offspring: float,
                  tournament_size: int,
                  num_offspring: int,
                  crossover_prob: float,
                  classification: bool,
-                 gamma: float = 0.0) -> None:
+                 gamma: float = 0.0,
+                 checkpoint_every_generation: bool = True) -> None:
         """
         Initializes the HPO EA class with the provided parameters.
 
@@ -94,7 +95,9 @@ class EA(BaseEA):
                 (``classification=False``) one of ['RF', 'ET', 'SVR', 'GB', 'KNN', 'MLP', 'XGB']. The
                 kernel-SVM token differs by mode ('KSVC' for classification, 'SVR' for regression)
                 and each is only valid in its own mode.
-            tpe_prob (float): Probability of using TPE-based selection.
+            tpe_offspring (float): Probability that an offspring is chosen by the TPE from
+                ``num_offspring`` candidate siblings (the TPE offspring probability). Otherwise a
+                single unguided candidate is used.
             seed (int): Random seed for reproducibility.
             gens (int): Number of generations to evolve.
             pop_size (int): Population size for the evolutionary algorithm.
@@ -108,6 +111,10 @@ class EA(BaseEA):
                 CV evaluation function, and (via BaseEA) how the data is split. For regression the
                 target is used as-is -- pre-scale/transform it as needed.
             gamma (float): Gamma parameter for TPE.
+            checkpoint_every_generation (bool): Record the best-so-far model's train/validation/test
+                performance in ``checkpoints.csv`` after the initial population and after every
+                generation (see ``BaseEA._checkpoint``). Reporting only; the search never reads it.
+                Defaults to True.
         """
         # initialize the base class (classification vs. regression drives the data split there)
         super().__init__(
@@ -117,6 +124,7 @@ class EA(BaseEA):
             mut_prob=mut_prob,
             crossover_prob=crossover_prob,
             classification=classification,
+            checkpoint_every_generation=checkpoint_every_generation,
         )
 
 
@@ -148,7 +156,7 @@ class EA(BaseEA):
         self.num_offspring = num_offspring
 
         # TPE-related parameters
-        self.tpe_prob = tpe_prob
+        self.tpe_offspring = tpe_offspring
         self.tpe = HPO_TPE(gamma=gamma)
 
         # full provenance archive of every evaluated individual (generation, construction, ei,
@@ -231,6 +239,7 @@ class EA(BaseEA):
         """
 
         start_time = time.time()
+        self._search_clock_start = start_time
 
         # Initialize population with random individuals
         self.initialize_population()
@@ -249,6 +258,8 @@ class EA(BaseEA):
         # keep track of best
         self.update_best_seen(self.population)
         print(f"Best performance so far (Gen -1): {self.best_perf}", flush=True)
+        if self.checkpoint_every_generation:
+            self._checkpoint(-1)
 
         # Start evolution
         for g in range(gens):
@@ -275,9 +286,11 @@ class EA(BaseEA):
             # keep track of best
             self.update_best_seen(self.population)
             print(f"Best performance so far (Gen {g}): {self.best_perf}", flush=True)
+            if self.checkpoint_every_generation:
+                self._checkpoint(g)
 
-        # save total runtime for the run (minutes)
-        self.total_time_minutes = (time.time() - start_time) / 60
+        # save total runtime for the run (minutes), excluding time spent in checkpoints
+        self.total_time_minutes = (time.time() - start_time) / 60 - self.checkpoint_minutes
 
         # make sure that the archive is the correct size
         print(f"Hard evaluations: {self.hard_eval_count}", flush=True)
@@ -289,7 +302,13 @@ class EA(BaseEA):
         # The returned individual is the held best entry (``_select_best``), fixed whenever the best
         # score last strictly improved. Fit it on the full training set and score it on the test set.
         best_individual, best_val = self._select_best()
-        train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+        # with checkpoints on, the last row already holds this best's refit, so it is not fitted again.
+        # Otherwise (or if that refit failed) fit it now, exactly as before checkpointing existed.
+        final_scores = self._final_scores_from_checkpoint()
+        if final_scores is None:
+            train_score, test_score, complexity = self.model_test_evaluation(best_individual)
+        else:
+            train_score, test_score, complexity = final_scores
         # 1-based position of the best entry among all candidates considered (duplicates included),
         # matching the Optuna runner's best_eval (trial.number + 1)
         best_eval = self.best_entry.id + 1
@@ -548,7 +567,7 @@ class EA(BaseEA):
 
         Each entry in ``variation_order`` is either 'm' (mutation, consumes 1 parent) or 'c'
         (crossover, consumes 2 parents); ``parent_ids`` is consumed left-to-right in that order.
-        Every offspring rolls for TPE-guided selection (probability ``self.tpe_prob``):
+        Every offspring rolls for TPE-guided selection (probability ``self.tpe_offspring``):
 
           - Mutation: on a TPE roll, ``num_offspring`` candidates are generated by randomly
             resampling the parent's parameters (``mutate_parameters_random``) and the best is chosen
@@ -575,8 +594,8 @@ class EA(BaseEA):
         # store offspring here
         offspring = []
 
-        # fit tpe model if self.tpe_prob > 0
-        if self.tpe_prob > 0.0:
+        # fit tpe model if self.tpe_offspring > 0
+        if self.tpe_offspring > 0.0:
             self.tpe.fit(self._tpe_samples(), self.param_space, self.rng)
 
         # consume parents left-to-right as dictated by the variation order. Each variation
@@ -738,7 +757,7 @@ class EA(BaseEA):
         """
         Produce one offspring from a single parent by random mutation.
 
-        Rolls for TPE-guided selection (probability ``self.tpe_prob``):
+        Rolls for TPE-guided selection (probability ``self.tpe_offspring``):
           - non-TPE: a single offspring produced by a random resample of the parent's parameters
             (``mutate_parameters_random``).
           - TPE: generate ``self.num_offspring`` random candidates and keep the one the TPE surrogate
@@ -761,7 +780,7 @@ class EA(BaseEA):
         """
         Produce one offspring from two parents by crossover.
 
-        Rolls for TPE-guided selection (probability ``self.tpe_prob``):
+        Rolls for TPE-guided selection (probability ``self.tpe_offspring``):
           - non-TPE: recombine the parents (uniform crossover) and, with probability
             ``self.mut_prob``, apply a random mutation to the child; keep that single candidate.
           - TPE: generate ``self.num_offspring`` candidates, each a recombined child that (with
@@ -818,7 +837,7 @@ class EA(BaseEA):
     def _tpe_or_explore(self, tpe_candidate, explore_candidate) -> Tuple[dict, str, str, float]:
         """
         Shared TPE decision used by both variation operators. Rolls for TPE-guided variation
-        (probability ``self.tpe_prob``): on a TPE roll, generate ``self.num_offspring`` candidates
+        (probability ``self.tpe_offspring``): on a TPE roll, generate ``self.num_offspring`` candidates
         via ``tpe_candidate`` and return the one the TPE surrogate ranks best; otherwise return a
         single candidate from ``explore_candidate``.
 
@@ -838,7 +857,7 @@ class EA(BaseEA):
             expected-improvement score (the surrogate's acquisition value for a TPE pick, ``-inf``
             for a random pick).
         """
-        if self.rng.random() < self.tpe_prob:
+        if self.rng.random() < self.tpe_offspring:
             candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]
             encoded = [self.param_space.tpe_parameters(params) for params, _ in candidate_offspring]
             candidate_index = self.tpe.suggest_one(encoded, self.rng)
@@ -1089,6 +1108,9 @@ class EA(BaseEA):
 
         # save the full provenance archive of every evaluated individual
         self.save_archive(task_output_dir)
+
+        # per-generation test checkpoints (written only when checkpointing produced rows)
+        self.save_checkpoints(task_output_dir)
 
         # save total runtime in .txt file
         runtime_path = os.path.join(save_dir, "total_runtime_minutes.txt")
