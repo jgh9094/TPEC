@@ -92,8 +92,10 @@ if __name__ == "__main__":
     parser.add_argument('--crossover_prob', type=float, required=True, help='Probability of applying crossover.')
     # component (structural) mutation probability
     parser.add_argument('--component_mut_prob', type=float, required=True, help="Probability a node's component is resampled (structural mutation).")
-    # TPE probability
-    parser.add_argument('--tpe_prob', type=float, required=True, help='Probability of using TPE-based selection.')
+    # TPE offspring probability
+    parser.add_argument('--tpe_offspring', type=float, required=True, help='Probability that an offspring is chosen by the TPE from num_offspring candidate siblings.')
+    # TPE parent-selection probability (CASH only; 0 = tournaments compare fitness only)
+    parser.add_argument('--tpe_selection', type=float, default=0.0, help='Probability that a parent tournament compares TPE scores instead of fitness.')
     # tournament size
     parser.add_argument('--tournament_size', type=int, required=True, help='Tournament size for parent selection.')
     # number of offspring for TPE
@@ -126,7 +128,8 @@ if __name__ == "__main__":
     print(f"Mutation Probability: {args.mut_prob}", flush=True)
     print(f"Crossover Probability: {args.crossover_prob}", flush=True)
     print(f"Component Mutation Probability: {args.component_mut_prob}", flush=True)
-    print(f"TPE Probability: {args.tpe_prob}", flush=True)
+    print(f"TPE Offspring Probability: {args.tpe_offspring}", flush=True)
+    print(f"TPE Selection Probability: {args.tpe_selection}", flush=True)
     print(f"Tournament Size: {args.tournament_size}", flush=True)
     print(f"Num Offspring: {args.num_offspring}", flush=True)
     print(f"Gamma: {args.gamma}", flush=True)
@@ -156,7 +159,8 @@ if __name__ == "__main__":
         pop_size=args.pop_size,
         cores=args.cores,
         mut_prob=args.mut_prob,
-        tpe_prob=args.tpe_prob,
+        tpe_offspring=args.tpe_offspring,
+        tpe_selection=args.tpe_selection,
         tournament_size=args.tournament_size,
         num_offspring=args.num_offspring,
         crossover_prob=args.crossover_prob,
