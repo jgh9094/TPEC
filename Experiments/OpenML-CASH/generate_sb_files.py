@@ -44,9 +44,20 @@ import os
 # Directory that holds this script; the .sb tree is written beneath it.
 SWEEP_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SWEEP_DIR, os.pardir, os.pardir))
-# local copy of the suite, read only to list the tasks and their sizes (the HPC copy is DATA_DIRECTORY below)
-LOCAL_SUITE_DIR = os.path.join(REPO_ROOT, "Experiments", "Data-Preprocessing",
-                               "OpenML_Suite_271_Classification_CSV")
+# Where tasks_summary.csv (the task list and row counts) is read from. The HPC copy comes first, because
+# the HPC repo has no Experiments/Data-Preprocessing folder; locally the repo copy is used.
+SUITE_SOURCE_DIRS = (
+    "/home/hernandezj45/Repos/TPEC/Data/OpenML_Suite_271_Classification_CSV",
+    os.path.join(REPO_ROOT, "Experiments", "Data-Preprocessing", "OpenML_Suite_271_Classification_CSV"),
+)
+
+def find_suite_dir() -> str:
+    """The first suite folder that contains tasks_summary.csv."""
+    for candidate in SUITE_SOURCE_DIRS:
+        if os.path.isfile(os.path.join(candidate, "tasks_summary.csv")):
+            return candidate
+    raise FileNotFoundError(f"tasks_summary.csv not found in any of: {SUITE_SOURCE_DIRS}")
+
 
 # --- settings you may edit -------------------------------------------------------------
 
@@ -144,8 +155,9 @@ def pct(value: float) -> int:
     return int(round(value * 100))
 
 
-def load_tasks(suite_dir: str = LOCAL_SUITE_DIR):
+def load_tasks(suite_dir: str = None):
     """(task_id, rows) for every task in the suite's tasks_summary.csv, in file order."""
+    suite_dir = suite_dir or find_suite_dir()
     with open(os.path.join(suite_dir, "tasks_summary.csv"), newline="") as f:
         return [(int(row["task_id"]), int(row["rows"])) for row in csv.DictReader(f)]
 
@@ -182,7 +194,7 @@ def time_limit(rows: int) -> str:
     return next(limit for max_rows, limit in TIME_LIMITS if rows <= max_rows)
 
 
-def generate(output_root: str = SWEEP_DIR, suite_dir: str = LOCAL_SUITE_DIR) -> int:
+def generate(output_root: str = SWEEP_DIR, suite_dir: str = None) -> int:
     """Write every (condition, task) .sb file under ``output_root``. Returns the number written."""
     assert BUDGET % POP_SIZE == 0, "BUDGET must be a multiple of POP_SIZE"
     tasks = load_tasks(suite_dir)
