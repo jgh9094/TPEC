@@ -10,7 +10,7 @@ Conditions (each crossed with every task in tasks_summary.csv):
 
   * tournament size in TOURNAMENT_SIZES (2 and 5);
   * EA: tpe_offspring = 0. The TPE is never fitted, so gamma cannot affect it; it runs once per
-    tournament size (gamma 0.0 is passed and ignored), not once per gamma;
+    tournament size (EA_GAMMA is passed and ignored), not once per gamma;
   * TPE: tpe_offspring in {0.5, 1.0} x gamma in GAMMAS (0.20, 0.30).
 
 That is 2 x (1 + 2 x 2) = 10 conditions x 35 tasks = 350 .sb files. Each file is an N_SEEDS-task array
@@ -76,6 +76,9 @@ NUM_OFFSPRING = 10
 TOURNAMENT_SIZES = (2, 5)
 # gamma: fraction of the history treated as "good" by the TPE; used only where the TPE is used
 GAMMAS = (0.20, 0.30)
+# gamma passed to the EA conditions. The EA never fits the TPE, so this value has no effect on the run, but
+# CASH_TPE rejects gamma outside (0, 1), so it must be a valid number.
+EA_GAMMA = 0.20
 # TPE offspring levels; 0.0 is the EA condition (generated once per tournament size)
 TPE_OFFSPRING_LEVELS = (0.0, 0.5, 1.0)
 # replicates: seeds 0 .. N_SEEDS - 1, one array task per seed (odd, so each task has a single median run)
@@ -219,8 +222,8 @@ def generate(output_root: str = SWEEP_DIR, suite_dir: str = None) -> int:
                 tpe_offspring=tpe_offspring,
                 tournament_size=tournament,
                 num_offspring=NUM_OFFSPRING,
-                # EA conditions pass gamma 0.0: it is unused there (the TPE is never fitted)
-                gamma=0.0 if gamma is None else gamma,
+                # EA conditions pass EA_GAMMA: it is unused there (the TPE is never fitted)
+                gamma=EA_GAMMA if gamma is None else gamma,
                 data_directory=DATA_DIRECTORY,
                 rows=rows,
                 task_id=task_id,
