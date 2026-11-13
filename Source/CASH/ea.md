@@ -113,9 +113,7 @@ per-step allow-lists (`scalers`/`transformers`/`selectors`/`predictors`; empty =
 registry). The pipeline space, operators, and TPE are **deferred** to `load_data_pd`.
 
 The TPE and checkpoint arguments: `tpe_offspring` (probability an offspring is chosen by the TPE from
-`num_offspring` candidate siblings), `tpe_selection` (default 0.0; probability
-a parent tournament compares TPE scores instead of fitness; see
-[parent selection](#parent-selection-and-the-two-tpe-knobs)), and `checkpoint_every_generation`
+`num_offspring` candidate siblings) and `checkpoint_every_generation`
 (default `True`; see [per-generation checkpoints](#per-generation-test-checkpoints)).
 
 `load_data_pd` ([ea.py:471](Source/CASH/ea.py#L471)) calls the base loader, then:
@@ -150,10 +148,10 @@ initial population and after every generation (see [per-generation checkpoints](
 2. `evaluation(...)` → `record_history(generation=-1)` → `_drop_errored` → `update_best_seen` →
    `_checkpoint(-1)`.
 3. Per generation `g`:
-   - `_fit_tpe()` — resets the per-generation tournament counters and, if `tpe_offspring > 0` or
-     `tpe_selection > 0`, fits the TPE on the archive (`tpe_ready` records whether the fit succeeded).
-   - `variation_order` → `parent_selection` (tournaments; see
-     [the two TPE knobs](#parent-selection-and-the-two-tpe-knobs)) → `generate_offspring` →
+   - `_fit_tpe()` — if `tpe_offspring > 0`, fits the TPE on the archive (`tpe_ready` records whether
+     the fit succeeded).
+   - `variation_order` → `parent_selection` (fitness tournaments; see
+     [parent selection](#parent-selection)) → `generate_offspring` →
      `evaluation` → `record_history(generation=g)` → `_drop_errored` → `update_best_seen` →
      `_checkpoint(g)`.
 4. Finish: `total_time_minutes` is recorded **without** checkpoint time. The held best's result comes
@@ -231,41 +229,21 @@ The candidate factories are what make CASH's variation structural + parametric:
 one `CASHIndividual` per unique genome key, each with **negated** validation performance (TPE
 minimizes; the EA maximizes). Errored pipelines negate into the "bad" group.
 
-### Parent selection and the two TPE knobs
+### Parent selection
 
-Two knobs let the TPE act on the population at different points. They are independent, and both
-default to 0.
+Tournaments are decided by validation fitness. For each of the `num_parents` tournaments,
+`parent_selection` draws `k = min(tournament_size, len(population))` competitors with `rng.choice`, takes
+the highest validation score, and breaks ties with `rng.choice`.
 
-- **`tpe_offspring`** (also in HPO): the probability an offspring is chosen by the TPE from
-  `num_offspring` candidate siblings (see *Offspring construction*).
-- **`tpe_selection`** (CASH only): the probability that a **parent tournament** compares its
-  candidates by their TPE score (`CASH_TPE.score_candidates`, higher is better) instead of by
-  validation fitness. It is drawn independently for each tournament.
+A `tpe_selection` knob (the probability that a tournament compared TPE scores instead of fitness) was
+tried in the HIV TwoKnob sweep and removed: it weakened selection pressure without improving
+offspring (see `Data-Tools/HIV-TwoKnob/REPORT.md`; the code is in git history up to commit `d268a07`).
+At `tpe_selection = 0` that code drew exactly the same random numbers as the current one, so the
+reference fixture `Test/fixtures/reference_cash_archive.json` still reproduces
+(`Test/test_cash_parent_selection.py`).
 
-`parent_selection` computes the comparison keys once per call: validation fitness always, and TPE
-scores only when `tpe_selection > 0` and `tpe_ready`. Then, for each of the `num_parents` tournaments,
-it makes these draws in this order:
-
-1. **Key roll**, only if the TPE key can change the winner (`use_tpe_scores and k > 1`):
-   `by_tpe = rng.random() < tpe_selection`. Otherwise no draw is made.
-2. `rng.choice` of the `k = min(tournament_size, len(population))` competitors, as before.
-3. The winner is the highest key among them. Ties are broken by `rng.choice`, as before.
-
-What follows from this:
-
-- With `tpe_selection = 0`, when the TPE is not ready, or for a size-1 tournament, no roll is drawn,
-  so the random stream is identical to the code before the knob existed. The reference fixture
-  `Test/fixtures/reference_cash_archive.json` checks this exactly (`Test/test_cash_tpe_selection.py`).
-- If `tpe_selection > 0` but `tpe_ready` is False (history too small to fit), every tournament uses
-  fitness.
-- A size-1 tournament always uses fitness, even at `tpe_selection = 1`, because one candidate wins
-  whatever the key.
-- The archive schema is unchanged. Each generation's tournaments are counted:
-  `tpe_selection_tournaments` (decided by TPE score) and `fitness_tournaments` (decided by fitness,
-  including all size-1 tournaments). The counters reset at the start of each generation and go into
-  `checkpoints.csv`.
-
-The TPE is fitted by `_fit_tpe` before parent selection, because parent selection may now need it.
+The TPE is fitted once per generation by `_fit_tpe`, before any offspring is built, and only when
+`tpe_offspring > 0`.
 `CASH_TPE.fit` consumes no random draws (every KDE it builds has a bandwidth floor, so the jitter
 path that uses `rng` never runs). Fitting earlier than the old per-offspring point therefore leaves
 the search unchanged.
@@ -303,7 +281,7 @@ population and after every generation, and writes one row to `checkpoints.csv`. 
 | `refit` | True if the pipeline was refit at this checkpoint |
 | `refit_error` | empty unless the refit failed |
 | `search_minutes` | search time so far, **excluding** checkpoint time |
-| `tpe_ready`, `tpe_selection_tournaments`, `fitness_tournaments` | this generation's TPE fit result and tournament counts (CASH only; False and 0 at generation −1) |
+| `tpe_ready` | whether the TPE was fitted this generation (CASH only; False at generation −1) |
 
 Rules:
 
@@ -345,7 +323,7 @@ record_history ─▶ CASHArchive.add(...) ─▶ writes archive_id back onto ea
         │
 _fit_tpe (start of generation) ── tpe_ready = tpe.fit(_tpe_samples() from archive)
         │
-parent_selection ── per tournament: validation fitness, or TPE score (tpe_selection)
+parent_selection ── fitness tournaments
         │
 generate_offspring ── mutate / crossover ── TPE-chosen offspring (tpe_offspring)
         │                 └─ structural (component) + parametric (shift/random) variation

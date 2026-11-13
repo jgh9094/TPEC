@@ -20,9 +20,9 @@ from Source.Base.model_param_space import ModelParams, DataContext, IntParam, Fl
 class RandomForestParams(ModelParams):
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'n_estimators': IntParam(bounds=(100, 500), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'max_depth': IntParam(bounds=(1, 10), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'max_samples': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
@@ -55,9 +55,9 @@ class ExtraTreesParams(ModelParams):
     """
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'n_estimators': IntParam(bounds=(100, 500), type='int'),
             'criterion': CatParam(bounds=('gini', 'entropy', 'log_loss'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'max_depth': IntParam(bounds=(1, 10), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'class_weight': CatParam(bounds=('None', 'balanced', 'balanced_subsample'), type='cat')
         })
@@ -111,10 +111,10 @@ class GradientBoostParams(ModelParams):
         super().__init__(param_space={
             'loss': CatParam(bounds=('log_loss', 'exponential'), type='cat') if binary_class else CatParam(bounds=('log_loss',), type='cat'),
             'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'n_estimators': IntParam(bounds=(100, 500), type='int'),
             'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'criterion': CatParam(bounds=('friedman_mse', 'squared_error'), type='cat'),
-            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'max_depth': IntParam(bounds=(1, 10), type='int'),
             'max_features': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False)
         })
 
@@ -173,7 +173,7 @@ class MLPClassifierParams(ModelParams):
             'activation': CatParam(bounds=('identity', 'logistic', 'tanh', 'relu'), type='cat'),
             'solver': CatParam(bounds=('lbfgs', 'sgd', 'adam'), type='cat'),
             'alpha': FloatParam(bounds=(1e-6, 1e-1), type='float', log=True),
-            'max_iter': IntParam(bounds=(10000, 100000), type='int')
+            'max_iter': IntParam(bounds=(1000, 2000), type='int')
         })
 
     def eval_parameters(self, model_params: Dict[str, Any], random_state: Optional[int] = None) -> Dict[str, Any]:
@@ -187,6 +187,12 @@ class MLPClassifierParams(ModelParams):
                 'solver': model_params['solver'],
                 'alpha': model_params['alpha'],
                 'max_iter': model_params['max_iter'],
+                # Early stopping holds out 10% of the training data and stops once the held-out accuracy has
+                # not improved for 10 epochs. Only adam and sgd use it: lbfgs trains on all the data and stops
+                # on its own tolerance, so the flag would do nothing there.
+                'early_stopping': model_params['solver'] in ('adam', 'sgd'),
+                'validation_fraction': 0.1,
+                'n_iter_no_change': 10,
                 'random_state': random_state}
 
     def get_model_type(self) -> str:
@@ -223,9 +229,9 @@ class XGBClassifierParams(ModelParams):
     """
     def __init__(self, ctx: DataContext, offset: float = 1.0e-4):
         super().__init__(param_space={
-            'n_estimators': IntParam(bounds=(100, 1000), type='int'),
+            'n_estimators': IntParam(bounds=(100, 500), type='int'),
             'learning_rate': FloatParam(bounds=(1e-3, 0.5), type='float', log=True),
-            'max_depth': IntParam(bounds=(1, 20), type='int'),
+            'max_depth': IntParam(bounds=(1, 10), type='int'),
             'subsample': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'colsample_bytree': FloatParam(bounds=(0.0 + offset, 1.0 - offset), type='float', log=False),
             'min_child_weight': FloatParam(bounds=(1e-2, 2e2), type='float', log=True),

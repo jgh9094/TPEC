@@ -274,13 +274,9 @@ The TPE is fitted by `CASH.EA._fit_tpe` at the start of each generation, before 
 `_tpe_or_explore`. See [ea.md](Source/CASH/ea.md):
 
 ```python
-# once per generation, before parent selection, from the deduplicated archive history
-# (negated val performance). Skipped when tpe_offspring = tpe_selection = 0:
+# once per generation, from the deduplicated archive history (negated val performance).
+# Skipped when tpe_offspring = 0:
 self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)   # bool gate
-
-# parent selection, per tournament (only when tpe_ready and tpe_selection > 0):
-tpe_scores = self.tpe.score_candidates([p.get_genotype() for p in population])   # higher = better
-# a tournament is decided by tpe_scores with probability tpe_selection, else by validation fitness
 
 # per TPE-guided offspring (only when tpe_ready, with probability tpe_offspring):
 candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]  # same operator as non-TPE
@@ -294,9 +290,8 @@ Key points specific to CASH (contrast with HPO):
 - **Three-part score.** Per-node structure + joint structure + per-node parameter evidence with a
   pooled fallback, versus HPO's single flat group.
 - **`fit` returns a `bool`.** The EA gates TPE use on `tpe_ready`; HPO's `fit` returns `None`.
-- **One fit, two consumers.** The same fitted model ranks offspring (`suggest_one`, `tpe_offspring`)
-  and, when `tpe_selection > 0`, ranks parents through `score_candidates`. Scoring only reads the
-  fitted model and makes no random draws, so the fit is shared without changing any other draw.
+- **One fit per generation.** The fitted model ranks every TPE-guided offspring of that generation
+  (`suggest_one`). Scoring only reads the fitted model and makes no random draws.
 - **No `tpe_parameters` encoding.** `score_candidates` reads the nested `Candidate` dicts directly;
   HPO re-encodes each flat genotype through `param_space.tpe_parameters` first.
 - **Negated objective, ranking only.** `_tpe_samples` ([ea.py:982](Source/CASH/ea.py#L982))

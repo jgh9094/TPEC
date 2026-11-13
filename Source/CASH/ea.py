@@ -352,7 +352,7 @@ def cv_pipeline_regression(
 
 # TPE columns CASH appends to checkpoints.csv after the shared ones (see BaseEA.checkpoint_columns).
 # They describe how the TPE was used in that generation, not the pipelines' quality.
-CASH_CHECKPOINT_COLUMNS = ["tpe_ready", "tpe_selection_tournaments", "fitness_tournaments"]
+CASH_CHECKPOINT_COLUMNS = ["tpe_ready"]
 
 
 @typechecked
@@ -383,7 +383,6 @@ class EA(BaseEA):
                  tpe_joint_weight: float = 1.0,
                  tpe_component_fallback: bool = True,
                  dedup_offspring: bool = True,
-                 tpe_selection: float = 0.0,
                  checkpoint_every_generation: bool = True) -> None:
         """
         Initializes the CASH EA.
@@ -432,11 +431,6 @@ class EA(BaseEA):
                 (up to ``num_offspring`` attempts); the initial population is drawn without
                 repeats. If every attempt is a repeat, one is kept anyway and counted in
                 ``self.redundant_offspring``. Defaults to True.
-            tpe_selection (float): TPE parent-selection probability: the probability that a parent
-                tournament compares the candidates' TPE scores (``CASH_TPE.score_candidates``, higher
-                is better) instead of their validation fitness. Defaults to 0.0 (fitness only, the
-                original behaviour). Only used once the TPE has been fitted this generation; otherwise
-                every tournament falls back to fitness. Size-1 tournaments always use fitness.
             checkpoint_every_generation (bool): Record the best-so-far pipeline's train/validation/test
                 performance in ``checkpoints.csv`` after the initial population and after every
                 generation (see ``BaseEA._checkpoint``). Reporting only; the search never reads it.
@@ -460,12 +454,6 @@ class EA(BaseEA):
         # CASH-specific validation
         assert 0.0 <= component_mut_prob <= 1.0, "Component mutation probability must be between 0 and 1."
         self.component_mut_prob = component_mut_prob
-        assert 0.0 <= tpe_selection <= 1.0, "TPE selection probability must be between 0 and 1."
-        self.tpe_selection = tpe_selection
-        # per-generation parent-selection counters (reset at the start of each generation by _fit_tpe):
-        # tournaments decided by TPE score vs by validation fitness (size-1 tournaments count as fitness)
-        self.tpe_selection_tournaments = 0
-        self.fitness_tournaments = 0
 
         # per-step allow-lists of component identifiers the evolution may use (empty -> full set for
         # that step). Keyed by node name so _build_pipeline_space can filter each registry. None is
@@ -751,8 +739,7 @@ class EA(BaseEA):
             ``RANDOM_CONSTRUCTION``), and its expected-improvement score (the surrogate's acquisition
             value for a TPE pick, ``-inf`` for a random pick).
         """
-        # no roll at all when this knob is off: with tpe_selection > 0 the TPE is ready but must not
-        # make offspring draws, so the offspring random stream is unchanged by that knob
+        # no roll at all when this knob is off, so the random stream matches the TPE-free EA exactly
         if self.tpe_ready and self.tpe_offspring > 0.0 and (self.rng.random() < self.tpe_offspring):
             candidate_offspring = [tpe_candidate() for _ in range(self.num_offspring)]
             # drop redundant siblings (already evaluated / already produced this generation) before
@@ -832,8 +819,7 @@ class EA(BaseEA):
             self._checkpoint(-1)
 
         for g in range(gens):
-            # fit the TPE once on the current history (and reset the per-generation counters). This
-            # comes first because parent selection may also rank by TPE score (tpe_selection).
+            # fit the TPE once on the current history, before any offspring of this generation is made
             self._fit_tpe()
 
             # decide per-offspring operators and how many parents they consume
@@ -924,40 +910,29 @@ class EA(BaseEA):
 
     def _fit_tpe(self) -> None:
         """
-        Start-of-generation step: reset the per-generation parent-selection counters, then fit the
-        TPE once on the current history.
+        Start-of-generation step: fit the TPE once on the current history.
 
-        This runs before parent selection, because parent selection can rank by TPE score
-        (``tpe_selection``) as well as offspring variation (``tpe_offspring``). The fit is skipped when
-        neither knob is on, so with both at 0 the TPE is never touched and ``tpe_ready`` stays False.
+        The fit is skipped when ``tpe_offspring`` is 0, so the plain EA never touches the TPE and
+        ``tpe_ready`` stays False.
 
         Draw-neutral: ``CASH_TPE.fit`` consumes no random draws. Every KDE it builds carries a bandwidth
-        floor, so the jitter path (the only user of ``rng``) never runs. Fitting earlier than the old
-        per-offspring point therefore leaves the random stream unchanged.
+        floor, so the jitter path (the only user of ``rng``) never runs. Fitting once per generation
+        rather than per offspring therefore leaves the random stream unchanged.
         """
-        self.tpe_selection_tournaments = 0
-        self.fitness_tournaments = 0
         self.tpe_ready = False
-        if self.tpe_offspring > 0.0 or self.tpe_selection > 0.0:
+        if self.tpe_offspring > 0.0:
             self.tpe_ready = self.tpe.fit(self._tpe_samples(), self.rng)
 
     def parent_selection(self, population: List[Individual], num_parents: int, rng: np.random.Generator) -> List[int]:
         """
-        Select parents via tournament selection. Each tournament is decided by one of two comparison keys:
+        Select parents via tournament selection on validation fitness (maximize).
 
-          * validation fitness (maximize), the original behaviour; or
-          * the TPE score (``CASH_TPE.score_candidates``, higher = more promising), chosen with
-            probability ``self.tpe_selection`` per tournament.
+        Random draws per tournament, in this order: ``rng.choice`` of the ``k`` competitors, then
+        ``rng.choice`` to break ties among the best.
 
-        The TPE score is used only when ``tpe_selection > 0`` AND the TPE was fitted this generation
-        (``tpe_ready``). If history was too small to fit (``tpe_ready`` False), every tournament falls
-        back to fitness. A size-1 tournament always uses fitness, since one candidate wins whatever the key.
-
-        Random draws, per tournament and in this order, so the stream matches the fitness-only code
-        exactly whenever the TPE key is not in use:
-          1. ``rng.random()`` for the key roll, only when the TPE key can matter (see above);
-          2. ``rng.choice`` of the ``k`` competitors (as before);
-          3. ``rng.choice`` to break ties in the chosen key (as before).
+        (A TPE-scored tournament key, ``tpe_selection``, was tried in the HIV TwoKnob sweep and removed:
+        it weakened selection pressure without improving offspring. See Data-Tools/HIV-TwoKnob/REPORT.md.
+        With ``tpe_selection = 0`` that code drew exactly the same random numbers as this one.)
 
         Parameters:
             population (List[Individual]): The population of individuals.
@@ -972,27 +947,15 @@ class EA(BaseEA):
         # a tournament cannot draw more distinct competitors than the population holds; dropping
         # errored pipelines can shrink the population below tournament_size, so clamp accordingly.
         k = min(self.tournament_size, len(population))
-
-        # the comparison keys, computed once per call: validation fitness always, TPE scores only when used
         fitness = np.array([ind.get_val_performance() for ind in population])
-        use_tpe_scores = bool(self.tpe_selection > 0.0 and self.tpe_ready)
-        tpe_scores = self.tpe.score_candidates([ind.get_genotype() for ind in population]) if use_tpe_scores else None
 
         parent_ids = []
         for _ in range(num_parents):
-            # roll first, but only when the TPE key can change the winner: with one competitor it cannot
-            by_tpe = use_tpe_scores and k > 1 and bool(rng.random() < self.tpe_selection)
             indices = rng.choice(len(population), k, replace=False)
-            key = tpe_scores if by_tpe else fitness
-            keys = key[indices]
+            keys = fitness[indices]
             best_idx = np.argmax(keys)
             winner = int(rng.choice([i for i, value in zip(indices, keys) if value == keys[best_idx]]))
             parent_ids.append(winner)
-
-            if by_tpe:
-                self.tpe_selection_tournaments += 1
-            else:
-                self.fitness_tournaments += 1
 
         return parent_ids
 
@@ -1568,22 +1531,17 @@ class EA(BaseEA):
     # ------------------------------------------------------------------ results
 
     def checkpoint_columns(self) -> List[str]:
-        """The shared checkpoint columns, then the CASH TPE-selection columns."""
+        """The shared checkpoint columns, then the CASH TPE column."""
         return super().checkpoint_columns() + CASH_CHECKPOINT_COLUMNS
 
     def _checkpoint_extra_fields(self, generation: int) -> Dict[str, Any]:
         """
-        TPE columns for this generation's checkpoint row. Generation -1 (the initial population) has no
-        TPE fit and no offspring tournaments, so it reports False and zeros. For generation g the values
-        are this generation's fit result and tournament counts (set by _fit_tpe and parent_selection).
+        TPE column for this generation's checkpoint row: whether the TPE was fitted this generation
+        (set by _fit_tpe). Generation -1 (the initial population) has no TPE fit, so it reports False.
         """
         if generation < 0:
-            return {"tpe_ready": False, "tpe_selection_tournaments": 0, "fitness_tournaments": 0}
-        return {
-            "tpe_ready": bool(self.tpe_ready),
-            "tpe_selection_tournaments": self.tpe_selection_tournaments,
-            "fitness_tournaments": self.fitness_tournaments,
-        }
+            return {"tpe_ready": False}
+        return {"tpe_ready": bool(self.tpe_ready)}
 
     def save_results(self, save_dir: str) -> None:
         """
